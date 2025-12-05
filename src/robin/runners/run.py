@@ -6,12 +6,9 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 from torch.random import seed as seeder
 
-from mirror.dataloaders.loader import DataModule
-from mirror.encoders import (
-    TableEncoder,
-    XYDataset,
-)
-from mirror.runners import helpers
+from robin.dataloaders.loader import DataModule
+from robin.encoders import TableEncoder, XYDataset
+from robin.runners import helpers
 
 
 def run_command(
@@ -38,7 +35,7 @@ def run_command(
     save_dir = Path(config.get("logging", {}).get("dir", "logs"))
     project = str(config.get("logging", {}).get("project"))
     name = str(config.get("logging", {}).get("name"))
-    
+
     # create directories
     save_dir.mkdir(exist_ok=True, parents=True)
 
@@ -55,41 +52,36 @@ def run_command(
     y_dataset = y_encoder.encode(data=y)
 
     xy_dataset = XYDataset(x_dataset, y_dataset)
-    datamodule = DataModule(
-        dataset=xy_dataset,
-        **config.get("datamodule", {})
+    datamodule = DataModule(dataset=xy_dataset, **config.get("datamodule", {}))
+
+    model = helpers.build_cvae(
+        config=config, x_encoder=x_encoder, y_encoder=y_encoder
     )
 
-    model = helpers.build_cvae(config=config, x_encoder=x_encoder, y_encoder=y_encoder)
-    
     callbacks = helpers.build_callbacks(config)
 
     trainer = Trainer(
-        callbacks=callbacks,
-        logger=logger,
-        **config.get("trainer", {}),
+        callbacks=callbacks, logger=logger, **config.get("trainer", {})
     )
 
     trainer.fit(model=model, train_dataloaders=datamodule)
 
     checkpoint_dir = Path(trainer.checkpoint_callback.dirpath)
     data_dir = checkpoint_dir.parent / "data"
-    data_dir.mkdir(exist_ok = True) 
+    data_dir.mkdir(exist_ok=True)
 
     gen_loader = helpers.build_gen_loader(config, y_dataset=y_dataset)
-    
-    ys, xs, zs = helpers.generate(config, dataloader=gen_loader, trainer=trainer)
+
+    ys, xs, zs = helpers.generate(
+        config, dataloader=gen_loader, trainer=trainer
+    )
 
     y_synth = y_encoder.decode(ys)
     x_synth = x_encoder.decode(xs).drop("pid")
     synth = pl.concat([y_synth, x_synth], how="horizontal")
 
-    synth.write_csv(
-        data_dir / "synthetic.csv"
-    )
+    synth.write_csv(data_dir / "synthetic.csv")
 
     pl.DataFrame(zs.detach().numpy()).write_csv(
         data_dir / "zs.csv", include_header=False
     )
-
-    

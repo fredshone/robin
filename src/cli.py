@@ -5,7 +5,7 @@ from typing import Optional
 import click
 import yaml
 
-from mirror.runners.tune import tune_command
+from robin.runners.tune import tune_command
 
 
 @click.version_option(package_name="mirror")

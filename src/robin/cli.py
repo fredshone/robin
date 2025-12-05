@@ -3,8 +3,8 @@ from typing import Optional
 import click
 import yaml
 
-from mirror.runners.run import run_command
-from mirror.runners.tune import tune_command
+from robin.runners.run import run_command
+from robin.runners.tune import tune_command
 
 
 @click.version_option(package_name="mirror")

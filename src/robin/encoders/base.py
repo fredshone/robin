@@ -3,7 +3,7 @@ from typing import Iterable, Optional
 import polars as pl
 from torch import Tensor
 
-from mirror.encoders.utils import tokenize
+from robin.encoders.utils import tokenize
 
 
 class BaseEncoder:
@@ -19,13 +19,17 @@ class BaseEncoder:
     def __str__(self):
         return f"{self.__class__.__name__}"
 
-    def read_polars(self, data: Iterable, name: Optional[str] = None) -> pl.Series:
+    def read_polars(
+        self, data: Iterable, name: Optional[str] = None
+    ) -> pl.Series:
         if not isinstance(data, pl.Series):
-            print(f"Attempting to convert data ({type(data)}) to polars Series.")
+            print(
+                f"Attempting to convert data ({type(data)}) to polars Series."
+            )
             data = pl.Series(data)
 
         return data
-    
+
     def get_weights(self) -> Optional[Tensor]:
         return None
 
@@ -100,9 +104,7 @@ class TimeEncoder(BaseEncoder):
             UserWarning: If the data is not of type int or float.
         """
         if not data.dtype.is_numeric():
-            raise UserWarning(
-                "TimeEncoder only supports numeric data types."
-            )
+            raise UserWarning("TimeEncoder only supports numeric data types.")
         if cycle <= 0:
             raise UserWarning("Cycle must be larger than 0.")
         self.mini = min_value
@@ -161,7 +163,7 @@ class CategoricalTokeniser(BaseEncoder):
         """Calculate weights for each category based on their frequency in the data.
         Weights are calculated as the inverse of the frequency, normalized by the mean frequency.
         So that the mean weight is 1.
-        
+
         Returns:
             Tensor: weights for each category."""
         freq = self.encoded.bincount().float()

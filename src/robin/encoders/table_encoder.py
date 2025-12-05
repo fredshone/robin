@@ -6,7 +6,7 @@ import polars as pl
 from torch import Tensor, stack
 from torch.utils.data import Dataset
 
-from mirror.encoders.base import CategoricalTokeniser, ContinuousEncoder
+from robin.encoders.base import CategoricalTokeniser, ContinuousEncoder
 
 
 class CensusDataset(Dataset):
@@ -39,7 +39,7 @@ class TableEncoder:
             include (list, optional): columns to include. Defaults to None.
             exclude (list, optional): columns to exclude. Defaults to None.
         """
-        
+
         self.verbose = verbose
         columns = data.columns
         columns = [col for col in columns if col not in ["pid", "iid", "hid"]]
@@ -61,7 +61,9 @@ class TableEncoder:
         else:
             raise ValueError("Data must be a pandas or polars dataframe")
 
-    def configure_polars(self, data: pl.DataFrame, verbose: bool = False) -> None:
+    def configure_polars(
+        self, data: pl.DataFrame, verbose: bool = False
+    ) -> None:
         """Configure the tokeniser by encoding the dataframe columns.
         Args:
             data (pl.DataFrame): input dataframe to configure.
@@ -89,7 +91,14 @@ class TableEncoder:
                 self.encoders[column] = CategoricalTokeniser(
                     data[column], column, verbose=verbose
                 )
-            elif dtype in [pl.Int8, pl.Int16, pl.Int32, pl.Int64, pl.Float32, pl.Float64]:
+            elif dtype in [
+                pl.Int8,
+                pl.Int16,
+                pl.Int32,
+                pl.Int64,
+                pl.Float32,
+                pl.Float64,
+            ]:
                 self.encoders[column] = ContinuousEncoder(
                     data[column], column, verbose=verbose
                 )
@@ -98,7 +107,9 @@ class TableEncoder:
                     f"Column '{column}' not supported for encoding: {values.dtype}"
                 )
 
-    def configure_pandas(self, data: pd.DataFrame, verbose: bool = False) -> None:
+    def configure_pandas(
+        self, data: pd.DataFrame, verbose: bool = False
+    ) -> None:
         """Configure the tokeniser by encoding the dataframe columns.
         Args:
             data (pd.DataFrame): input dataframe to configure.
@@ -186,7 +197,7 @@ class TableEncoder:
             List[int]: list of sizes of the embeddings.
         """
         return [encoder.size for encoder in self.encoders.values()]
-    
+
     def weights(self) -> List[List[Optional[float]]]:
         """Get the weights of the embeddings.
         Returns:
@@ -207,13 +218,21 @@ class TableEncoder:
         for i, (name, encoder) in enumerate(self.encoders.items()):
             tokens = data[:, i]
             decoded[name] = encoder.decode(tokens)
-        decoded = pd.DataFrame(decoded) if self.mode == pd.DataFrame else pl.DataFrame(decoded)
+        decoded = (
+            pd.DataFrame(decoded)
+            if self.mode == pd.DataFrame
+            else pl.DataFrame(decoded)
+        )
         return decoded
 
-    def argmax_decode(self, data: List[Tensor]) -> Union[pd.DataFrame, pl.DataFrame]:
+    def argmax_decode(
+        self, data: List[Tensor]
+    ) -> Union[pd.DataFrame, pl.DataFrame]:
         argmaxed = [d.argmax(dim=-1) for d in data]
         return self.decode(argmaxed)
 
-    def multinomial_decode(self, data: List[Tensor]) -> Union[pd.DataFrame, pl.DataFrame]:
+    def multinomial_decode(
+        self, data: List[Tensor]
+    ) -> Union[pd.DataFrame, pl.DataFrame]:
         sampled = [d.multinomial(1).squeeze() for d in data]
         return self.decode(sampled)

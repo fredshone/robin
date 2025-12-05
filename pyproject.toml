@@ -1,5 +1,5 @@
 [project]
-name = "mirror"
+name = "robin"
 description = "population generation using variation auto-encoders"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -44,13 +44,13 @@ dependencies = [
 ]
 
 [project.scripts]
-mirror="mirror.cli:cli"
+robin="robin.cli:cli"
 
 [project.urls]
-repository = "https://github.com/fredshone/mirror"
+repository = "https://github.com/fredshone/robin"
 
 [tool.setuptools.dynamic]
-version = { attr = "mirror.__version__" }
+version = { attr = "robin.__version__" }
 
 [tool.uv]
 package = true
@@ -70,7 +70,7 @@ torchvision = [
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-rav --strict-markers -n2 --nbmake --nbmake-kernel=mirror --cov --cov-report=xml --cov-config=pyproject.toml -m 'not high_mem' -p no:memray"
+addopts = "-rav --strict-markers -n2 --nbmake --nbmake-kernel=robin --cov --cov-report=xml --cov-config=pyproject.toml -m 'not high_mem' -p no:memray"
 testpaths = ["tests", "examples", "integration_tests"]
 # to mark a test, decorate it with `@pytest.mark.[marker-name]`
 markers = ["high_mem", "limit_memory"]
@@ -131,12 +131,12 @@ docstring-quotes = "double"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["mirror*"]
+include = ["robin*"]
 
 [tool.setuptools.package-data]
 # Add file globs from the source code directory if they include non-py files that should be packaged
 # E.g. "fixtures/**/*"
-mirror = []
+robin = []
 
 [build-system]
 requires = ["setuptools"]

@@ -8,13 +8,10 @@ from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 from torch.random import seed as seeder
 
-from mirror.dataloaders.loader import DataModule
-from mirror.encoders import (
-    TableEncoder,
-    XYDataset,
-)
-from mirror.eval.density import mean_mean_absolute_error
-from mirror.runners import helpers
+from robin.dataloaders.loader import DataModule
+from robin.encoders import TableEncoder, XYDataset
+from robin.eval.density import mean_mean_absolute_error
+from robin.runners import helpers
 
 
 def tune_command(
@@ -63,10 +60,7 @@ def tune_command(
     y_dataset = y_encoder.encode(data=y)
 
     xy_dataset = XYDataset(x_dataset, y_dataset)
-    datamodule = DataModule(
-        dataset=xy_dataset,
-        **config.get("datamodule", {})
-    )
+    datamodule = DataModule(dataset=xy_dataset, **config.get("datamodule", {}))
 
     trials = config.get("tune", {}).get("trials", 20)
     prune = config.get("tune", {}).get("prune", True)
@@ -77,8 +71,10 @@ def tune_command(
         trial_name = build_trial_name(trial.number)
         logger = WandbLogger(dir=tune_dir, name=trial_name)
 
-        model = helpers.build_cvae(config=trial_config, x_encoder=x_encoder, y_encoder=y_encoder)
-        
+        model = helpers.build_cvae(
+            config=trial_config, x_encoder=x_encoder, y_encoder=y_encoder
+        )
+
         callbacks = helpers.build_callbacks(trial_config)
 
         trainer = Trainer(
@@ -93,15 +89,21 @@ def tune_command(
         trainer.fit(model=model, train_dataloaders=datamodule)
 
         gen_loader = helpers.build_gen_loader(config, y_dataset=y_dataset)
-        
-        xs, ys, zs = helpers.generate(config, dataloader=gen_loader, trainer=trainer)
+
+        xs, ys, zs = helpers.generate(
+            config, dataloader=gen_loader, trainer=trainer
+        )
 
         # y_synth = y_encoder.decode(ys)
         x_synth = x_encoder.decode(xs).drop("pid")
         # synth = pl.concat([y_synth, x_synth], how="horizontal")
 
-        mmae_first = mean_mean_absolute_error(target=x, synthetic=x_synth, order=1)
-        mmae_second = mean_mean_absolute_error(target=x, synthetic=x_synth, order=2)
+        mmae_first = mean_mean_absolute_error(
+            target=x, synthetic=x_synth, order=1
+        )
+        mmae_second = mean_mean_absolute_error(
+            target=x, synthetic=x_synth, order=2
+        )
         mmae = (mmae_first + mmae_second) / 2.0
 
         return mmae

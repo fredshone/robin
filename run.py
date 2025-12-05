@@ -10,11 +10,11 @@ from pytorch_lightning.callbacks import (
 from pytorch_lightning.loggers import WandbLogger
 from torch import concat
 
-from mirror.dataloaders.loader import DataLoader
-from mirror.dataloaders.z_loader import build_latent_dataloader
-from mirror.encoders.table_encoder import TableEncoder
-from mirror.models.vae import VAE
-from mirror.models.vae_components import Decoder, Encoder
+from robin.dataloaders.loader import DataLoader
+from robin.dataloaders.z_loader import build_latent_dataloader
+from robin.encoders.table_encoder import TableEncoder
+from robin.models.vae import VAE
+from robin.models.vae_components import Decoder, Encoder
 
 LOGDIR = Path("logs")
 SIZE = 10000
