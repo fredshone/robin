@@ -2,6 +2,7 @@ from pathlib import Path
 
 import polars as pl
 import torch
+import yaml
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
 from torch.random import seed as seeder
@@ -14,9 +15,8 @@ from robin.runners import helpers
 def run_command(
     config: dict,
     verbose: bool = False,
-    gen: bool = True,
-    test: bool = False,
-    infer=True,
+    ckpt_path: Path = None,
+    losses: bool = True,
 ) -> None:
     """
     Train, test and generate.
@@ -24,9 +24,8 @@ def run_command(
     Args:
         config (dict): The configuration dictionary.
         verbose (bool, optional): Whether to print verbose output. Defaults to False.
-        gen (bool, optional): Whether to generate synthetic data. Defaults to True.
-        test (bool, optional): Whether to test the model. Defaults to False.
-        infer (bool, optional): Whether to infer the model. Defaults to True.
+        ckpt_path (Path, optional): Path to a checkpoint file. Defaults to None.
+        losses (bool, optional): Whether to run tests and return losses. Defaults to True.
 
     Returns:
         None
@@ -39,11 +38,14 @@ def run_command(
     # create directories
     save_dir.mkdir(exist_ok=True, parents=True)
 
+    # save config
+    with open(save_dir / "config.yaml", "w") as file:
+        yaml.dump(config, file)
+
     logger = WandbLogger(save_dir=save_dir, project=project, name=name)
 
     seed = config.pop("seed", seeder())
     torch.manual_seed(seed)
-    verbose = config.get("verbose", False)
 
     x, y = helpers.load_data(config)
     x_encoder = TableEncoder(x, verbose=verbose)
@@ -54,8 +56,11 @@ def run_command(
     xy_dataset = XYDataset(x_dataset, y_dataset)
     datamodule = DataModule(dataset=xy_dataset, **config.get("datamodule", {}))
 
-    model = helpers.build_cvae(
-        config=config, x_encoder=x_encoder, y_encoder=y_encoder
+    model = helpers.build_model(
+        config=config,
+        x_encoder=x_encoder,
+        y_encoder=y_encoder,
+        ckpt_path=ckpt_path,
     )
 
     callbacks = helpers.build_callbacks(config)
@@ -66,8 +71,14 @@ def run_command(
 
     trainer.fit(model=model, train_dataloaders=datamodule)
 
-    checkpoint_dir = Path(trainer.checkpoint_callback.dirpath)
-    data_dir = checkpoint_dir.parent / "data"
+    root = Path(trainer.checkpoint_callback.dirpath).parent
+
+    if losses:
+        loss = helpers.run_tests(trainer=trainer, ckpt_path=ckpt_path)
+        with open(root / "losses.yaml", "w") as file:
+            yaml.dump(loss, file)
+
+    data_dir = root / "data"
     data_dir.mkdir(exist_ok=True)
 
     gen_loader = helpers.build_gen_loader(config, y_dataset=y_dataset)

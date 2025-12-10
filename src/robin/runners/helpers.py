@@ -1,4 +1,6 @@
-from typing import Tuple
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, Tuple
 
 import polars as pl
 from pytorch_lightning import LightningModule, Trainer
@@ -33,7 +35,9 @@ def load_data(config: dict) -> Tuple[pl.DataFrame, pl.DataFrame]:
     return x, y
 
 
-def build_cvae(config: dict, x_encoder, y_encoder) -> LightningModule:
+def build_model(
+    config: dict, x_encoder, y_encoder, ckpt_path: Optional[Path] = None
+) -> LightningModule:
     model_params = config.get("model", {})
 
     # encoder block to embed labels into vec with hidden size
@@ -68,7 +72,7 @@ def build_cvae(config: dict, x_encoder, y_encoder) -> LightningModule:
         latent_size=model_params.get("latent_size", defaults.LATENT_SIZE),
     )
 
-    return CVAE(
+    model = CVAE(
         embedding_names=x_encoder.names(),
         embedding_types=x_encoder.types(),
         embedding_weights=x_encoder.weights(),
@@ -78,6 +82,9 @@ def build_cvae(config: dict, x_encoder, y_encoder) -> LightningModule:
         beta=model_params.get("beta", defaults.DEFAULT_BETA),
         lr=model_params.get("lr", defaults.DEFAULT_LR),
     )
+    if ckpt_path:
+        model = model.load_from_checkpoint(ckpt_path)
+    return model
 
 
 def build_callbacks(config: dict):
@@ -97,6 +104,29 @@ def build_callbacks(config: dict):
             save_weights_only=True,
         ),
     ]
+
+
+def run_tests(trainer: Trainer, ckpt_path: Optional[str] = None) -> dict:
+    if ckpt_path is None:
+        ckpt_path = "best"
+
+    losses = {}
+
+    losses["train"] = trainer.test(
+        ckpt_path=ckpt_path, dataloaders=trainer.datamodule.train_dataloader()
+    )
+
+    losses["val"] = trainer.test(
+        ckpt_path=ckpt_path, dataloaders=trainer.datamodule.val_dataloader()
+    )
+
+    if trainer.datamodule.test_dataloader() is not None:
+        losses["test"] = trainer.test(
+            ckpt_path=ckpt_path,
+            dataloaders=trainer.datamodule.test_dataloader(),
+        )
+
+    return losses
 
 
 def build_gen_loader(config: dict, y_dataset: Tensor) -> DataLoader:

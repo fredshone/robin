@@ -71,7 +71,7 @@ def tune_command(
         trial_name = build_trial_name(trial.number)
         logger = WandbLogger(dir=tune_dir, name=trial_name)
 
-        model = helpers.build_cvae(
+        model = helpers.build_model(
             config=trial_config, x_encoder=x_encoder, y_encoder=y_encoder
         )
 
