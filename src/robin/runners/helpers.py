@@ -1,11 +1,10 @@
-from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
 import polars as pl
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-from torch import Tensor, argmax, concat, stack
+from torch import Tensor, argmax, concat, isnan, multinomial, stack
 from torch.utils.data import DataLoader
 
 from robin.encoders import YZDataset, ZDataset
@@ -18,21 +17,28 @@ from robin.models.cvae_components import (
 from robin.runners import defaults
 
 
-def load_data(config: dict) -> Tuple[pl.DataFrame, pl.DataFrame]:
+def load_data(config: dict) -> pl.DataFrame:
     # load data
     x_path = config["data"]["train_path"]
     x = pl.read_csv(x_path)
 
     # rename columns and select as required
-    rename = config["data"].get("columns", {})
-    if rename:
+    rename = config["data"].get("columns")
+    if isinstance(rename, dict):
         x = x.rename(rename)
         x = x.select(list(rename.values()))
+    elif isinstance(rename, list) and rename:
+        x = x.select(rename)
+    return x
 
+
+def split_data(
+    config: dict, x: pl.DataFrame
+) -> Tuple[pl.DataFrame, pl.DataFrame]:
     y_cols = config["data"]["controls"]
     y = x.select(y_cols)
     x = x.drop(y_cols)
-    return x, y
+    return y, x
 
 
 def build_model(
@@ -131,13 +137,11 @@ def run_tests(trainer: Trainer, ckpt_path: Optional[str] = None) -> dict:
 
 def build_gen_loader(config: dict, y_dataset: Tensor) -> DataLoader:
     n = len(y_dataset)
-    z_loader = ZDataset(
-        n,
-        latent_size=config.get("model", {}).get(
-            "latent_size", defaults.LATENT_SIZE
-        ),
+    latent_size = config.get("model", {}).get(
+        "latent_size", defaults.LATENT_SIZE
     )
-    yz_loader = YZDataset(z_loader, y_dataset)
+    z_loader = ZDataset(n, latent_size)
+    yz_loader = YZDataset(y_dataset, z_loader)
     return DataLoader(yz_loader, **config.get("gen_dataloader", {}))
 
 
@@ -146,9 +150,48 @@ def generate(
 ) -> Tuple[Tensor, Tensor, Tensor]:
     ys, xs, zs = zip(*trainer.predict(dataloaders=dataloader))
     ys = concat(ys)
-    # todo: currently using argmax to decode categorical variables
-    xs = concat(
-        [stack([argmax(x, dim=1) for x in xb], dim=-1) for xb in xs], dim=0
-    )
+    xs = [concat(x) for x in zip(*xs)]
     zs = concat(zs)
     return ys, xs, zs
+
+
+def sample(config: dict, xs: Tensor) -> list[Tensor]:
+    """Sample from the output distributions.
+
+    Args:
+        xs (Tensor): List of output tensors from the model.
+
+    Returns:
+        list[Tensor]: Sampled tensors.
+    """
+    sampler = config.get("generate", {}).get("sample", "argmax")
+    if sampler == "argmax":
+        return argmax_sampling(xs)
+    elif sampler == "multinomial":
+        return multinomial_sampling(xs)
+    else:
+        raise ValueError(f"Unknown sampling method: {sampler}")
+
+
+def multinomial_sampling(xs: Tensor) -> list[Tensor]:
+    sampled = []
+    for x in xs:
+        if x.dim() == 1:
+            sampled.append(x)
+        else:
+            # check if any values are negative or NaN
+            if isnan(x).any():
+                sampled.append(x.argmax(dim=-1))
+            else:
+                sampled.append(multinomial(x, num_samples=1).squeeze(1))
+    return stack(sampled, dim=-1)
+
+
+def argmax_sampling(xs: Tensor) -> list[Tensor]:
+    sampled = []
+    for x in xs:
+        if x.dim() == 1:
+            sampled.append(x)
+        else:
+            sampled.append(argmax(x, dim=-1))
+    return stack(sampled, dim=-1)

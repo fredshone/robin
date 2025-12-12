@@ -3,24 +3,19 @@ import datetime
 from pathlib import Path
 
 import optuna
+import polars as pl
 import torch
 from pytorch_lightning import Trainer
-from pytorch_lightning.loggers import WandbLogger
 from torch.random import seed as seeder
 
 from robin.dataloaders.loader import DataModule
-from robin.encoders import TableEncoder, XYDataset
+from robin.encoders import TableEncoder, YXDataset
 from robin.eval.density import mean_mean_absolute_error
 from robin.runners import helpers
 
 
 def tune_command(
-    config: dict,
-    db_path: str = None,
-    verbose: bool = False,
-    gen: bool = True,
-    test: bool = False,
-    infer=True,
+    config: dict, db_path: str = None, verbose: bool = False
 ) -> None:
     """
     Tune the hyperparameters of the model using optuna.
@@ -29,10 +24,6 @@ def tune_command(
         config (dict): The configuration dictionary.
         db_path (str, optional): The path to the optuna database. Defaults to None.
         verbose (bool, optional): Whether to print verbose output. Defaults to False.
-        gen (bool, optional): Whether to generate synthetic data. Defaults to True.
-        test (bool, optional): Whether to test the model. Defaults to False.
-        infer (bool, optional): Whether to infer the model. Defaults to True.
-
     Returns:
         None
 
@@ -53,14 +44,15 @@ def tune_command(
     torch.manual_seed(seed)
     verbose = config.get("verbose", False)
 
-    x, y = helpers.load_data(config)
+    yx = helpers.load_data(config)
+    y, x = helpers.split_data(config, yx)
     x_encoder = TableEncoder(x, verbose=verbose)
     x_dataset = x_encoder.encode(data=x)
     y_encoder = TableEncoder(y, verbose=verbose)
     y_dataset = y_encoder.encode(data=y)
 
-    xy_dataset = XYDataset(x_dataset, y_dataset)
-    datamodule = DataModule(dataset=xy_dataset, **config.get("datamodule", {}))
+    yx_dataset = YXDataset(y_dataset, x_dataset)
+    datamodule = DataModule(dataset=yx_dataset, **config.get("datamodule", {}))
 
     trials = config.get("tune", {}).get("trials", 20)
     prune = config.get("tune", {}).get("prune", True)
@@ -68,8 +60,8 @@ def tune_command(
 
     def objective(trial: optuna.Trial) -> float:
         trial_config = build_config(trial, config)
-        trial_name = build_trial_name(trial.number)
-        logger = WandbLogger(dir=tune_dir, name=trial_name)
+        # trial_name = build_trial_name(trial.number)
+        # logger = WandbLogger(dir=tune_dir, name=trial_name)
 
         model = helpers.build_model(
             config=trial_config, x_encoder=x_encoder, y_encoder=y_encoder
@@ -78,9 +70,7 @@ def tune_command(
         callbacks = helpers.build_callbacks(trial_config)
 
         trainer = Trainer(
-            callbacks=callbacks,
-            logger=logger,
-            **trial_config.get("trainer", {}),
+            callbacks=callbacks, logger=None, **trial_config.get("trainer", {})
         )
 
         trainer.logger.log_hyperparams(trial.params)
@@ -88,21 +78,21 @@ def tune_command(
 
         trainer.fit(model=model, train_dataloaders=datamodule)
 
-        gen_loader = helpers.build_gen_loader(config, y_dataset=y_dataset)
-
-        xs, ys, zs = helpers.generate(
-            config, dataloader=gen_loader, trainer=trainer
+        gen_loader = helpers.build_gen_loader(trial_config, y_dataset=y_dataset)
+        ys, xs, zs = helpers.generate(
+            trial_config, dataloader=gen_loader, trainer=trainer
         )
+        xs = helpers.sample(trial_config, xs)
 
-        # y_synth = y_encoder.decode(ys)
-        x_synth = x_encoder.decode(xs).drop("pid")
-        # synth = pl.concat([y_synth, x_synth], how="horizontal")
+        y_synth = y_encoder.decode(ys)
+        x_synth = x_encoder.decode(xs)
+        synth = pl.concat([y_synth, x_synth], how="horizontal")
 
         mmae_first = mean_mean_absolute_error(
-            target=x, synthetic=x_synth, order=1
+            target=yx, synthetic=synth, order=1
         )
         mmae_second = mean_mean_absolute_error(
-            target=x, synthetic=x_synth, order=2
+            target=yx, synthetic=synth, order=2
         )
         mmae = (mmae_first + mmae_second) / 2.0
 
@@ -161,14 +151,14 @@ def build_trial_name(number: int) -> str:
     return str(number).zfill(4)
 
 
-def skey(key: str) -> str:
-    ks = key.split("_")
-    if len(ks) > 1:
-        return "".join([k[0].upper() for k in ks])
-    length = len(key)
-    if length > 3:
-        return key[:4]
-    return key
+# def skey(key: str) -> str:
+#     ks = key.split("_")
+#     if len(ks) > 1:
+#         return "".join([k[0].upper() for k in ks])
+#     length = len(key)
+#     if length > 3:
+#         return key[:4]
+#     return key
 
 
 def build_suggestions(trial: optuna.Trial, config: dict):

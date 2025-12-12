@@ -41,6 +41,7 @@ dependencies = [
   "wandb>=0.21.1",
   "polars>=1.32.3",
   "optuna>=4.6.0",
+  "optuna-dashboard>=0.20.0",
 ]
 
 [project.scripts]

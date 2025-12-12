@@ -1,0 +1,75 @@
+seed: 12345
+
+logging:
+  dir: "logs"
+  project: "ethiopia"
+  name: "test"
+
+data:
+  train_path: data/ethiopia/ethiopia_data_cleaned.csv
+  columns: [
+        age,
+        sex,
+        dist_road,
+        dist_market,
+        dist_border,
+        dist_popcenter,
+        dist_admhq,
+        denomination,
+        total_cons_ann,
+        nom_totcons_aeq,
+        walls_material,
+        roof_material,
+        floor_material,
+  ]
+  controls: [
+    sex,
+    age,
+    denomination,
+  ]
+
+datamodule:
+  val_split: 0.1
+  test_split: 0.1
+  train_batch_size: 1024
+  val_batch_size: 1024
+  test_batch_size: 1024
+  gen_batch_size: 1024
+  num_workers: 4
+  pin_memory: False
+
+gen_dataloader:
+  batch_size: 1024
+  num_workers: 4
+  pin_memory: False
+
+model:
+  latent_size: 4
+  beta: 0.1
+  lr: 0.01
+  controls_encoder:
+    depth: 1
+    hidden_size: 128
+  encoder:
+    depth: 1
+    hidden_size: 128
+  decoder:
+    depth: 1
+    hidden_size: 128
+
+early_stopping:
+  patience: 10
+
+trainer:
+  min_epochs: 10
+  max_epochs: 100
+  check_val_every_n_epoch: 1
+
+generate:
+  target_path: None
+  sample: multinomial
+
+evaluate:
+  include: None
+  exclude: Noneuv r
+  orders: [1,2,3]

@@ -8,7 +8,7 @@ from pytorch_lightning.loggers import WandbLogger
 from torch.random import seed as seeder
 
 from robin.dataloaders.loader import DataModule
-from robin.encoders import TableEncoder, XYDataset
+from robin.encoders import TableEncoder, YXDataset
 from robin.runners import helpers
 
 
@@ -47,14 +47,15 @@ def run_command(
     seed = config.pop("seed", seeder())
     torch.manual_seed(seed)
 
-    x, y = helpers.load_data(config)
+    yx = helpers.load_data(config)
+    y, x = helpers.split_data(config, yx)
     x_encoder = TableEncoder(x, verbose=verbose)
     x_dataset = x_encoder.encode(data=x)
     y_encoder = TableEncoder(y, verbose=verbose)
     y_dataset = y_encoder.encode(data=y)
 
-    xy_dataset = XYDataset(x_dataset, y_dataset)
-    datamodule = DataModule(dataset=xy_dataset, **config.get("datamodule", {}))
+    yx_dataset = YXDataset(y_dataset, x_dataset)
+    datamodule = DataModule(dataset=yx_dataset, **config.get("datamodule", {}))
 
     model = helpers.build_model(
         config=config,
@@ -86,9 +87,10 @@ def run_command(
     ys, xs, zs = helpers.generate(
         config, dataloader=gen_loader, trainer=trainer
     )
+    xs = helpers.sample(config, xs)
 
     y_synth = y_encoder.decode(ys)
-    x_synth = x_encoder.decode(xs).drop("pid")
+    x_synth = x_encoder.decode(xs)
     synth = pl.concat([y_synth, x_synth], how="horizontal")
 
     synth.write_csv(data_dir / "synthetic.csv")
