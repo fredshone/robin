@@ -87,10 +87,10 @@ class TableEncoder:
                 self.encoders[column] = CategoricalTokeniser(
                     data[column], column, verbose=verbose
                 )
-            elif -8 in values or values.n_unique() < 25:
-                self.encoders[column] = CategoricalTokeniser(
-                    data[column], column, verbose=verbose
-                )
+            # elif -8 in values and values.n_unique() < 25:
+            #     self.encoders[column] = CategoricalTokeniser(
+            #         data[column], column, verbose=verbose
+            #     )
             elif dtype in [
                 pl.Int8,
                 pl.Int16,
@@ -128,10 +128,10 @@ class TableEncoder:
                 self.encoders[column] = CategoricalTokeniser(
                     data[column], column, verbose=verbose
                 )
-            elif -8 in values or values.nunique() < 25:
-                self.encoders[column] = CategoricalTokeniser(
-                    data[column], column, verbose=verbose
-                )
+            # elif -8 in values or values.nunique() < 25:
+            #     self.encoders[column] = CategoricalTokeniser(
+            #         data[column], column, verbose=verbose
+            #     )
             elif ptypes.is_numeric_dtype(values):
                 self.encoders[column] = ContinuousEncoder(
                     data[column], column, verbose=verbose
@@ -214,7 +214,7 @@ class TableEncoder:
         Returns:
             Union[pd.DataFrame, pl.DataFrame]: decoded dataframe.
         """
-        decoded = {"pid": list(range(data.shape[0]))}
+        decoded = {}
         for i, (name, encoder) in enumerate(self.encoders.items()):
             tokens = data[:, i]
             decoded[name] = encoder.decode(tokens)

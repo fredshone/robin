@@ -25,13 +25,13 @@ class XDataset(Dataset):
         return len(self.data)
 
 
-class XYDataset(Dataset):
-    def __init__(self, x: Dataset, y: Dataset):
+class YXDataset(Dataset):
+    def __init__(self, y: Dataset, x: Dataset):
         """Dataset for the input features and target labels.
 
         Args:
-            x (Dataset): The input features.
             y (Dataset): The target labels.
+            x (Dataset): The input features.
 
         Raises:
             TypeError: If y or x is not a Dataset.
@@ -48,10 +48,10 @@ class XYDataset(Dataset):
         return f"{super().__repr__()}: {self.x.data.shape}, {self.y.data.shape}"
 
     def __getitem__(self, index):
-        return self.x[index], self.y[index]
+        return self.y[index], self.x[index]
 
     def __len__(self):
-        return len(self.x)
+        return len(self.y)
 
 
 class ZDataset(Dataset):
@@ -69,7 +69,7 @@ class ZDataset(Dataset):
 
 
 class YZDataset(Dataset):
-    def __init__(self, z: Dataset, y: Dataset):
+    def __init__(self, y: Dataset, z: Dataset):
         """Dataset for the latent variables and target labels.
 
         Args:
@@ -91,10 +91,10 @@ class YZDataset(Dataset):
         return f"{super().__repr__()}: {self.z.data.shape}, {self.y.data.shape}"
 
     def __getitem__(self, index):
-        return self.z[index], self.y[index]
+        return self.y[index], self.z[index]
 
     def __len__(self):
-        return len(self.z)
+        return len(self.y)
 
 
 class TableEncoder:

@@ -79,8 +79,8 @@ class ContinuousEncoder(BaseEncoder):
 
     def decode(self, data: Iterable) -> pl.Series:
         data = pl.Series(data)
-        new = data * self.range + self.mini
-        return new.astype(self.dtype)
+        new = (data * self.range) + self.mini
+        return new.cast(self.dtype)
 
 
 class TimeEncoder(BaseEncoder):

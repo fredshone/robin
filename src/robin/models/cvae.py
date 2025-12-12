@@ -55,19 +55,19 @@ class CVAE(LightningModule):
         self.criterion = nn.ModuleList(criterion)
 
     def forward(
-        self, x: Tensor, y: Tensor, target=None, **kwargs
+        self, y: Tensor, x: Tensor, target=None, **kwargs
     ) -> List[Tensor]:
         h_y = self.labels_encoder_block(y)
-        mu, log_var = self.encode(x, h_y)
+        mu, log_var = self.encode(h_y, x)
         z = self.reparameterize(mu, log_var)
-        log_probs_x = self.decode(z, h_y)
+        log_probs_x = self.decode(h_y, z)
         return [log_probs_x, mu, log_var, z]
 
-    def encode(self, x: Tensor, hidden_y: Tensor) -> list[Tensor]:
-        return self.encoder_block(x, hidden_y)
+    def encode(self, hidden_y: Tensor, x: Tensor) -> list[Tensor]:
+        return self.encoder_block(hidden_y, x)
 
-    def decode(self, z: Tensor, hidden_y: Tensor, **kwargs) -> List[Tensor]:
-        return self.decoder_block(z, hidden_y)
+    def decode(self, hidden_y: Tensor, z: Tensor, **kwargs) -> List[Tensor]:
+        return self.decoder_block(hidden_y, z)
 
     def loss_function(
         self,
@@ -81,7 +81,12 @@ class CVAE(LightningModule):
         recons = []
 
         for i, (name, etype, lprobs, criterion) in enumerate(
-            zip(self.embedding_names, self.embedding_types, log_probs, self.criterion)
+            zip(
+                self.embedding_names,
+                self.embedding_types,
+                log_probs,
+                self.criterion,
+            )
         ):
             target = targets[:, i]
             if etype == "continuous":
@@ -109,30 +114,31 @@ class CVAE(LightningModule):
         return metrics
 
     def kld(self, mu: Tensor, log_var: Tensor) -> Tensor:
-        return torch.mean(
+        kld = torch.mean(
             -0.5 * torch.sum(1 + log_var - mu**2 - log_var.exp(), dim=1), dim=0
         )
+        return kld
 
     def reparameterize(self, mu: Tensor, logvar: Tensor) -> Tensor:
         std = torch.exp(0.5 * logvar)
         eps = torch.randn_like(std)
         return (eps * std) + mu
 
-    def predict(self, z: Tensor, y: Tensor, **kwargs) -> List[Tensor]:
+    def predict(self, y: Tensor, z: Tensor, **kwargs) -> List[Tensor]:
         h_y = self.labels_encoder_block(y)
         prob_samples = [
-            torch.exp(probs) for probs in self.decode(z, h_y, **kwargs)
+            torch.exp(probs) for probs in self.decode(h_y, z, **kwargs)
         ]
         return y, prob_samples, z
 
-    def infer(self, x: Tensor, y: Tensor, **kwargs) -> Tensor:
-        log_probs_x, _, _, z = self.forward(x, y, **kwargs)
+    def infer(self, y: Tensor, x: Tensor, **kwargs) -> Tensor:
+        log_probs_x, _, _, z = self.forward(y, x, **kwargs)
         prob_samples = torch.exp(log_probs_x)
         return prob_samples, z
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
-        log_probs, mu, log_var, _ = self.forward(x, y)
+        y, x = batch
+        log_probs, mu, log_var, _ = self.forward(y, x)
         train_losses = self.loss_function(
             log_probs=log_probs, mu=mu, log_var=log_var, targets=x
         )
@@ -143,8 +149,8 @@ class CVAE(LightningModule):
         return train_losses["loss"]
 
     def validation_step(self, batch, batch_idx, optimizer_idx=0):
-        x, y = batch
-        log_probs, mu, log_var, _ = self.forward(x, y)
+        y, x = batch
+        log_probs, mu, log_var, _ = self.forward(y, x)
         loss = self.loss_function(
             log_probs=log_probs, mu=mu, log_var=log_var, targets=x
         )
@@ -162,5 +168,5 @@ class CVAE(LightningModule):
         return [optimizer], [scheduler]
 
     def predict_step(self, batch):
-        z, y = batch
-        return self.predict(z, y)
+        y, z = batch
+        return self.predict(y, z)
