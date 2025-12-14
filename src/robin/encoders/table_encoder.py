@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 from robin.encoders.base import CategoricalTokeniser, ContinuousEncoder
 
 
-class CensusDataset(Dataset):
+class TableDataset(Dataset):
     def __init__(self, data: Tensor):
         self.data = data
 
@@ -159,7 +159,7 @@ class TableEncoder:
             raise UserWarning("No encodings found.")
 
         encoded = stack(encoded, dim=-1).float()
-        dataset = CensusDataset(encoded)
+        dataset = TableDataset(encoded)
         if self.verbose:
             print(f"{self} encoded -> {dataset}")
         return dataset  # todo: weights

@@ -143,3 +143,9 @@ robin = []
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-xdist>=3.8.0",
+]
+
