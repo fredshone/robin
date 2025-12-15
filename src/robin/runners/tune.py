@@ -11,6 +11,7 @@ from torch.random import seed as seeder
 from robin.dataloaders.loader import DataModule
 from robin.encoders import TableEncoder, YXDataset
 from robin.eval.density import mean_mean_absolute_error
+from robin.eval.binning import bin_continuous
 from robin.runners import helpers
 
 
@@ -88,11 +89,13 @@ def tune_command(
         x_synth = x_encoder.decode(xs)
         synth = pl.concat([y_synth, x_synth], how="horizontal")
 
+        yx_binned, synth_binned = bin_continuous(yx, synth, bins=10)
+
         mmae_first = mean_mean_absolute_error(
-            target=yx, synthetic=synth, order=1
+            target=yx_binned, synthetic=synth_binned, order=1
         )
         mmae_second = mean_mean_absolute_error(
-            target=yx, synthetic=synth, order=2
+            target=yx_binned, synthetic=synth_binned, order=2
         )
         mmae = (mmae_first + mmae_second) / 2.0
 

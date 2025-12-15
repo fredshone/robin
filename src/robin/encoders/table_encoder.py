@@ -87,18 +87,7 @@ class TableEncoder:
                 self.encoders[column] = CategoricalTokeniser(
                     data[column], column, verbose=verbose
                 )
-            # elif -8 in values and values.n_unique() < 25:
-            #     self.encoders[column] = CategoricalTokeniser(
-            #         data[column], column, verbose=verbose
-            #     )
-            elif dtype in [
-                pl.Int8,
-                pl.Int16,
-                pl.Int32,
-                pl.Int64,
-                pl.Float32,
-                pl.Float64,
-            ]:
+            elif dtype.is_numeric():
                 self.encoders[column] = ContinuousEncoder(
                     data[column], column, verbose=verbose
                 )
@@ -128,10 +117,6 @@ class TableEncoder:
                 self.encoders[column] = CategoricalTokeniser(
                     data[column], column, verbose=verbose
                 )
-            # elif -8 in values or values.nunique() < 25:
-            #     self.encoders[column] = CategoricalTokeniser(
-            #         data[column], column, verbose=verbose
-            #     )
             elif ptypes.is_numeric_dtype(values):
                 self.encoders[column] = ContinuousEncoder(
                     data[column], column, verbose=verbose

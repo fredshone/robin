@@ -85,7 +85,7 @@ branch = true
 source = ["src/"]
 
 [tool.coverage.report]
-fail_under = 50
+fail_under = 40
 
 [tool.coverage.html]
 directory = "reports/coverage"

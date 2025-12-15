@@ -9,6 +9,8 @@ from torch.random import seed as seeder
 
 from robin.dataloaders.loader import DataModule
 from robin.encoders import TableEncoder, YXDataset
+from robin.eval import density
+from robin.eval.binning import bin_continuous
 from robin.runners import helpers
 
 
@@ -98,3 +100,19 @@ def run_command(
     pl.DataFrame(zs.detach().numpy()).write_csv(
         data_dir / "zs.csv", include_header=False
     )
+
+    yx_binned, synth_binned = bin_continuous(yx, synth, bins=10)
+
+    mmae_first = density.mean_mean_absolute_error(
+        target=yx_binned, synthetic=synth_binned, order=1
+    )
+    mmae_second = density.mean_mean_absolute_error(
+        target=yx_binned, synthetic=synth_binned, order=2
+    )
+    mmae_third = density.mean_mean_absolute_error(
+        target=yx_binned, synthetic=synth_binned, order=3
+    )
+
+    print("Eval MAAE First Order:", mmae_first)
+    print("Eval MAAE Second Order:", mmae_second)
+    print("Eval MAAE Third Order:", mmae_third)
