@@ -9,7 +9,7 @@ from torch.random import seed as seeder
 
 from robin.dataloaders.loader import DataModule
 from robin.encoders import TableEncoder, YXDataset
-from robin.eval import density
+from robin.eval import correctness, creativity, density
 from robin.eval.binning import bin_continuous
 from robin.runners import helpers
 
@@ -116,3 +116,11 @@ def run_command(
     print("Eval MAAE First Order:", mmae_first)
     print("Eval MAAE Second Order:", mmae_second)
     print("Eval MAAE Third Order:", mmae_third)
+
+    creativity_score = creativity.inverse_simpsons_index(synth_binned)
+
+    print("Eval Creativity (Inverse Simpsons Index):", creativity_score)
+
+    incorrectness_score = correctness.incorrectness(yx_binned, synth_binned)
+
+    print("Eval Incorrectness:", incorrectness_score)
