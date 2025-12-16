@@ -5,9 +5,9 @@ import polars as pl
 
 
 def mean_mean_absolute_error(
-    target: pl.DataFrame, synthetic: pl.DataFrame, order = 1) -> float:
-    """Compute the Mean Mean Absolute Error (MMAE) between target and synthetic DataFrames.
-    """
+    target: pl.DataFrame, synthetic: pl.DataFrame, order=1
+) -> float:
+    """Compute the Mean Mean Absolute Error (MMAE) between target and synthetic DataFrames."""
     maes = []
     for _, _, x, xhat in iter_joint_probs(target, synthetic, order=order):
         mae = calc_mae(x, xhat)
@@ -35,7 +35,7 @@ def frequencies(df: pl.DataFrame, cols: list[str], alias: str) -> pl.DataFrame:
 
 def iter_joint_probs(
     target, synthetic, order=2
-) -> Iterator[Tuple[str, pl.DataFrame, pl.DataFrame]]:
+) -> Iterator[Tuple[str, pl.Series, pl.Series, pl.Series]]:
     """Compute joint frequencies for combinations of columns in two DataFrames.
 
     Args:
@@ -44,24 +44,21 @@ def iter_joint_probs(
         order (int, optional): The size of column combinations to consider. Defaults to 2.
 
     Yields:
-        tuple: A tuple containing the name of the combination, the target frequencies,
+        tuple: A tuple containing the name of the combination, the shared index, target
                and the synthetic frequencies.
     """
     if not set(target.columns) == set(synthetic.columns):
         xor = set(target.columns).symmetric_difference(set(synthetic.columns))
         print(f"Column mismatch: {xor}")
-        raise ValueError("Target and synthetic DataFrames must have the same columns.")
+        raise ValueError(
+            "Target and synthetic DataFrames must have the same columns."
+        )
     for cols in combinations(target.columns, order):
         name = "_".join(cols)
         target_freq = frequencies(target, list(cols), "target")
         synthetic_freq = frequencies(synthetic, list(cols), "synthetic")
         joined = join_probs(target_freq, synthetic_freq)
-        yield (
-            name,
-            joined["index"],
-            joined["target"],
-            joined["synthetic"],
-        )
+        yield (name, joined["index"], joined["target"], joined["synthetic"])
 
 
 def join_probs(target: pl.DataFrame, synthetic: pl.DataFrame) -> pl.DataFrame:
