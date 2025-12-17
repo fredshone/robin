@@ -69,9 +69,10 @@ class ContinuousEncoder(BaseEncoder):
         self.encoding = "continuous"
         self.size = 1
 
-        print(
-            f"{self.__class__.__name__}: min: {self.mini}, max: {self.maxi}, range: {self.range}, dtype: {self.dtype}"
-        )
+        if verbose:
+            print(
+                f"{self.__class__.__name__}: min: {self.mini}, max: {self.maxi}, range: {self.range}, dtype: {self.dtype}"
+            )
 
     def encode(self, data: Iterable) -> Tensor:
         data = Tensor(data)

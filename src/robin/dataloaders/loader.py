@@ -49,7 +49,7 @@ class DataModule(LightningDataModule):
                     self.dataset, [1 - self.val_split, self.val_split]
                 )
             )
-            self.test_dataset = self.val_dataset
+            self.test_dataset = None
         else:
             (self.train_dataset, self.val_dataset, self.test_dataset) = (
                 torch.utils.data.random_split(
@@ -82,7 +82,9 @@ class DataModule(LightningDataModule):
             persistent_workers=True,
         )
 
-    def test_dataloader(self) -> DataLoader:
+    def test_dataloader(self) -> Optional[DataLoader]:
+        if self.test_dataset is None:
+            return None
         return DataLoader(
             self.test_dataset,
             batch_size=self.test_batch_size,

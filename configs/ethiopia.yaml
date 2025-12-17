@@ -3,7 +3,7 @@ seed: 12345
 logging:
   dir: "logs"
   project: "ethiopia"
-  name: "test"
+  name: "test3"
 
 data:
   train_path: data/ethiopia/ethiopia_data_cleaned.csv
@@ -30,7 +30,7 @@ data:
 
 datamodule:
   val_split: 0.1
-  test_split: 0.1
+  test_split: 0.0
   train_batch_size: 1024
   val_batch_size: 1024
   test_batch_size: 1024
@@ -48,7 +48,7 @@ model:
   beta: 0.1
   lr: 0.001
   controls_encoder:
-    depth: 2
+    depth: 1
     hidden_size: 256
   encoder:
     depth: 1
@@ -58,12 +58,13 @@ model:
     hidden_size: 256
 
 early_stopping:
-  patience: 10
+  patience: 20
 
 trainer:
   min_epochs: 10
   max_epochs: 100
   check_val_every_n_epoch: 1
+  log_every_n_steps: 10
 
 generate:
   target_path: None

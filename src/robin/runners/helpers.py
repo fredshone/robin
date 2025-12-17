@@ -8,11 +8,12 @@ from torch import Tensor, argmax, concat, isnan, multinomial, stack
 from torch.utils.data import DataLoader
 
 from robin.encoders import YZDataset, ZDataset
+from robin.eval import binning, correctness, creativity, density
 from robin.models.cvae import CVAE
 from robin.models.cvae_components import (
+    ControlsEncoderBlock,
     CVAEDecoderBlock,
     CVAEEncoderBlock,
-    LabelsEncoderBlock,
 )
 from robin.runners import defaults
 
@@ -42,12 +43,19 @@ def split_data(
 
 
 def build_model(
-    config: dict, x_encoder, y_encoder, ckpt_path: Optional[Path] = None
+    config: dict,
+    x_encoder,
+    y_encoder,
+    ckpt_path: Optional[Path] = None,
+    verbose: bool = False,
 ) -> LightningModule:
     model_params = config.get("model", {})
+    activation = model_params.get("activation", defaults.ACTIVATION)
+    normalize = model_params.get("normalize", defaults.NORMALIZE)
+    dropout = model_params.get("dropout", defaults.DROPOUT)
 
     # encoder block to embed labels into vec with hidden size
-    labels_encoder_block = LabelsEncoderBlock(
+    labels_encoder_block = ControlsEncoderBlock(
         encoder_types=y_encoder.types(),
         encoder_sizes=y_encoder.sizes(),
         depth=model_params.get("controls_encoder", {}).get(
@@ -56,6 +64,9 @@ def build_model(
         hidden_size=model_params.get("controls_encoder", {}).get(
             "hidden_size", defaults.WIDTH
         ),
+        activation=activation,
+        normalize=normalize,
+        dropout=dropout,
     )
 
     # encoder and decoder block to process census data
@@ -67,6 +78,9 @@ def build_model(
             "hidden_size", defaults.WIDTH
         ),
         latent_size=model_params.get("latent_size", defaults.LATENT_SIZE),
+        activation=activation,
+        normalize=normalize,
+        dropout=dropout,
     )
     decoder = CVAEDecoderBlock(
         encoder_types=x_encoder.types(),
@@ -76,6 +90,9 @@ def build_model(
             "hidden_size", defaults.WIDTH
         ),
         latent_size=model_params.get("latent_size", defaults.LATENT_SIZE),
+        activation=activation,
+        normalize=normalize,
+        dropout=dropout,
     )
 
     model = CVAE(
@@ -87,6 +104,7 @@ def build_model(
         decoder_block=decoder,
         beta=model_params.get("beta", defaults.DEFAULT_BETA),
         lr=model_params.get("lr", defaults.DEFAULT_LR),
+        verbose=verbose,
     )
     if ckpt_path:
         model = model.load_from_checkpoint(ckpt_path)
@@ -118,11 +136,11 @@ def run_tests(trainer: Trainer, ckpt_path: Optional[str] = None) -> dict:
 
     losses = {}
 
-    losses["train"] = trainer.test(
-        ckpt_path=ckpt_path, dataloaders=trainer.datamodule.train_dataloader()
-    )
+    # losses["train"] = trainer.test(
+    #     ckpt_path=ckpt_path, dataloaders=trainer.datamodule.train_dataloader()
+    # )
 
-    losses["val"] = trainer.test(
+    losses["val"] = trainer.validate(
         ckpt_path=ckpt_path, dataloaders=trainer.datamodule.val_dataloader()
     )
 
@@ -148,7 +166,7 @@ def build_gen_loader(config: dict, y_dataset: Tensor) -> DataLoader:
 def generate(
     config: dict, dataloader: DataLoader, trainer: Trainer
 ) -> Tuple[Tensor, Tensor, Tensor]:
-    ys, xs, zs = zip(*trainer.predict(dataloaders=dataloader))
+    ys, xs, zs = zip(*trainer.predict(dataloaders=dataloader, ckpt_path="best"))
     ys = concat(ys)
     xs = [concat(x) for x in zip(*xs)]
     zs = concat(zs)
@@ -195,3 +213,58 @@ def argmax_sampling(xs: Tensor) -> list[Tensor]:
         else:
             sampled.append(argmax(x, dim=-1))
     return stack(sampled, dim=-1)
+
+
+def evaluate(
+    target: pl.DataFrame, synthetic: pl.DataFrame, config: dict
+) -> pl.DataFrame:
+    """Evaluate the synthetic data against the target data.
+
+    Args:
+        target (pl.DataFrame): Target DataFrame.
+        synthetic (pl.DataFrame): Synthetic DataFrame.
+        config (dict): Configuration dictionary.
+
+    Returns:
+        dict: Evaluation metrics.
+    """
+    yx_binned, synth_binned = binning.bin_continuous(target, synthetic, bins=10)
+
+    mmae_first = density.mean_mean_absolute_error(
+        target=yx_binned,
+        synthetic=synth_binned,
+        order=1,
+        controls=config.get("data").get("controls"),
+    )
+    mmae_second = density.mean_mean_absolute_error(
+        target=yx_binned,
+        synthetic=synth_binned,
+        order=2,
+        controls=config.get("data").get("controls"),
+    )
+    mmae_third = density.mean_mean_absolute_error(
+        target=yx_binned,
+        synthetic=synth_binned,
+        order=3,
+        controls=config.get("data").get("controls"),
+    )
+
+    output = pl.DataFrame(
+        {
+            "": [
+                "MMAE (1st)",
+                "MMAE (2nd)",
+                "MMAE (3rd)",
+                "Homogeneity",
+                "Incorrectness",
+            ],
+            "Value": [
+                mmae_first,
+                mmae_second,
+                mmae_third,
+                creativity.simpsons_index(synth_binned),
+                correctness.incorrectness(yx_binned, synth_binned),
+            ],
+        }
+    )
+    return output

@@ -3,7 +3,7 @@ from typing import Tuple
 from torch import Tensor, nn, stack
 
 
-class LabelsEncoderBlock(nn.Module):
+class ControlsEncoderBlock(nn.Module):
     def __init__(
         self,
         encoder_types: list,
@@ -55,6 +55,7 @@ class CVAEEncoderBlock(nn.Module):
             normalize=normalize,
             dropout=dropout,
         )
+        self.batch_norm = nn.BatchNorm1d(hidden_size)
         self.fc_mu = nn.Linear(hidden_size, latent_size)
         self.fc_var = nn.Linear(hidden_size, latent_size)
 
@@ -93,7 +94,7 @@ class CVAEDecoderBlock(nn.Module):
         for type, size in zip(encoder_types, encoder_sizes):
             if type == "continuous":
                 embeds.append(
-                    nn.Sequential(nn.Linear(hidden_size, 1), nn.Sigmoid())
+                    nn.Sequential(nn.Linear(hidden_size, 1))  # , nn.Sigmoid())
                 )
             if type == "categorical":
                 embeds.append(
