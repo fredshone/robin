@@ -104,22 +104,31 @@ def run_command(
     yx_binned, synth_binned = bin_continuous(yx, synth, bins=10)
 
     mmae_first = density.mean_mean_absolute_error(
-        target=yx_binned, synthetic=synth_binned, order=1
+        target=yx_binned,
+        synthetic=synth_binned,
+        order=1,
+        controls=config.get("data").get("controls"),
     )
     mmae_second = density.mean_mean_absolute_error(
-        target=yx_binned, synthetic=synth_binned, order=2
+        target=yx_binned,
+        synthetic=synth_binned,
+        order=2,
+        controls=config.get("data").get("controls"),
     )
     mmae_third = density.mean_mean_absolute_error(
-        target=yx_binned, synthetic=synth_binned, order=3
+        target=yx_binned,
+        synthetic=synth_binned,
+        order=3,
+        controls=config.get("data").get("controls"),
     )
 
     print("Eval MAAE First Order:", mmae_first)
     print("Eval MAAE Second Order:", mmae_second)
     print("Eval MAAE Third Order:", mmae_third)
 
-    creativity_score = creativity.inverse_simpsons_index(synth_binned)
+    creativity_score = creativity.simpsons_index(synth_binned)
 
-    print("Eval Creativity (Inverse Simpsons Index):", creativity_score)
+    print("Eval Diversity (Simpsons Index):", creativity_score)
 
     incorrectness_score = correctness.incorrectness(yx_binned, synth_binned)
 
