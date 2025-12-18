@@ -9,8 +9,6 @@ from torch.random import seed as seeder
 
 from robin.dataloaders.loader import DataModule
 from robin.encoders import TableEncoder, YXDataset
-from robin.eval import correctness, creativity, density
-from robin.eval.binning import bin_continuous
 from robin.runners import helpers
 
 
@@ -64,6 +62,7 @@ def run_command(
         x_encoder=x_encoder,
         y_encoder=y_encoder,
         ckpt_path=ckpt_path,
+        verbose=verbose,
     )
 
     callbacks = helpers.build_callbacks(config)
@@ -101,26 +100,7 @@ def run_command(
         data_dir / "zs.csv", include_header=False
     )
 
-    yx_binned, synth_binned = bin_continuous(yx, synth, bins=10)
-
-    mmae_first = density.mean_mean_absolute_error(
-        target=yx_binned, synthetic=synth_binned, order=1
-    )
-    mmae_second = density.mean_mean_absolute_error(
-        target=yx_binned, synthetic=synth_binned, order=2
-    )
-    mmae_third = density.mean_mean_absolute_error(
-        target=yx_binned, synthetic=synth_binned, order=3
-    )
-
-    print("Eval MAAE First Order:", mmae_first)
-    print("Eval MAAE Second Order:", mmae_second)
-    print("Eval MAAE Third Order:", mmae_third)
-
-    creativity_score = creativity.inverse_simpsons_index(synth_binned)
-
-    print("Eval Creativity (Inverse Simpsons Index):", creativity_score)
-
-    incorrectness_score = correctness.incorrectness(yx_binned, synth_binned)
-
-    print("Eval Incorrectness:", incorrectness_score)
+    metrics = helpers.evaluate(target=yx, synthetic=synth, config=config)
+    with pl.Config(tbl_hide_dataframe_shape=True):
+        print(metrics)
+    metrics.write_csv(data_dir / "eval_metrics.csv")

@@ -31,5 +31,5 @@ def simpsons_index(data):
     return (probs**2).sum()
 
 
-def inverse_simpsons_index(data):
-    return 1 / simpsons_index(data)
+def simpsons_index_of_diversity(data):
+    return 1 - simpsons_index(data)

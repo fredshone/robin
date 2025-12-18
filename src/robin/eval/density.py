@@ -5,11 +5,23 @@ import polars as pl
 
 
 def mean_mean_absolute_error(
-    target: pl.DataFrame, synthetic: pl.DataFrame, order=1
+    target: pl.DataFrame, synthetic: pl.DataFrame, order=1, controls=None
 ) -> float:
-    """Compute the Mean Mean Absolute Error (MMAE) between target and synthetic DataFrames."""
+    """Compute the Mean Mean Absolute Error (MMAE) between target and synthetic DataFrames.
+
+    Args:
+        target (pl.DataFrame): Target DataFrame.
+        synthetic (pl.DataFrame): Synthetic DataFrame.
+        order (int, optional): The size of column combinations to consider. Defaults to 1.
+        controls (list[str], optional): List of columns to ignore. Defaults to None.
+
+    Returns:
+        float: The computed MMAE value.
+    """
     maes = []
-    for _, _, x, xhat in iter_joint_probs(target, synthetic, order=order):
+    for _, _, x, xhat in iter_joint_probs(
+        target, synthetic, order=order, ignore=controls
+    ):
         mae = calc_mae(x, xhat)
         maes.append(mae)
     mmae = sum(maes) / len(maes)
@@ -34,14 +46,16 @@ def frequencies(df: pl.DataFrame, cols: list[str], alias: str) -> pl.DataFrame:
 
 
 def iter_joint_probs(
-    target, synthetic, order=2
+    target, synthetic, order=2, ignore=None
 ) -> Iterator[Tuple[str, pl.Series, pl.Series, pl.Series]]:
     """Compute joint frequencies for combinations of columns in two DataFrames.
+    Ignore combinations that consist entirely of columns in the ignore list.
 
     Args:
         target (pl.DataFrame): Target DataFrame.
         synthetic (pl.DataFrame): Synthetic DataFrame.
         order (int, optional): The size of column combinations to consider. Defaults to 2.
+        ignore (list[str], optional): List of columns to ignore. Defaults to None.
 
     Yields:
         tuple: A tuple containing the name of the combination, the shared index, target
@@ -54,6 +68,8 @@ def iter_joint_probs(
             "Target and synthetic DataFrames must have the same columns."
         )
     for cols in combinations(target.columns, order):
+        if ignore is not None and all(col in ignore for col in cols):
+            continue
         name = "_".join(cols)
         target_freq = frequencies(target, list(cols), "target")
         synthetic_freq = frequencies(synthetic, list(cols), "synthetic")

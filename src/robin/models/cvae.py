@@ -46,7 +46,6 @@ class CVAE(LightningModule):
         for etype, weights in zip(self.embedding_types, self.embedding_weights):
             if etype == "continuous":
                 criterion.append(nn.MSELoss())
-            # move weights to device
             elif etype == "categorical":
                 criterion.append(nn.NLLLoss(weight=weights))
             else:
@@ -161,6 +160,14 @@ class CVAE(LightningModule):
             on_epoch=True,
             prog_bar=True,
         )
+
+    def test_step(self, batch):
+        y, x = batch
+        log_probs, mu, log_var, _ = self.forward(y, x)
+        loss = self.loss_function(
+            log_probs=log_probs, mu=mu, log_var=log_var, targets=x
+        )
+        self.log_dict({f"test_{key}": val.item() for key, val in loss.items()})
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.lr, weight_decay=0.01)
