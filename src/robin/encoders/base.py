@@ -1,9 +1,12 @@
+import sys
 from typing import Iterable, Optional
 
 import polars as pl
 from torch import Tensor
 
 from robin.encoders.utils import tokenize
+
+MAX_DECIMALS = sys.float_info.dig
 
 
 class BaseEncoder:
@@ -39,12 +42,48 @@ class BaseEncoder:
     def decode(self, data: Iterable) -> pl.Series:
         raise NotImplementedError("Decode method not implemented.")
 
+    def get_rounding(self, data: pl.Series) -> Optional[int]:
+        """Learn the number of digits to round data to.
 
-class ContinuousEncoder(BaseEncoder):
+        Args:
+            data (pl.Series):
+                Data to learn the number of digits to round to.
+
+        Returns:
+            int or None:
+                Number of digits to round to.
+        """
+        name = data.name if data.name is not None else "unknown"
+        roundable_data = data.filter(data.is_finite())
+
+        if len(roundable_data) == 0:
+            return None
+
+        # Try to round to fewer digits
+        highest_int = int(roundable_data.abs().max())
+        most_digits = len(str(highest_int)) if highest_int != 0 else 0
+        max_decimals = max(0, MAX_DECIMALS - most_digits)
+        if (roundable_data == roundable_data.round(max_decimals)).all():
+            for decimal in range(max_decimals + 1):
+                if (roundable_data == roundable_data.round(decimal)).all():
+                    return decimal
+
+        # Can't round, not equal after MAX_DECIMALS digits of precision
+        print(
+            f"No rounding scheme detected for column '{name}'. Data will not be rounded."
+        )
+        return None
+
+
+class MinMaxEncoder(BaseEncoder):
     def __init__(
-        self, data: Iterable, name: Optional[str] = None, verbose: bool = False
+        self,
+        data: Iterable,
+        name: Optional[str] = None,
+        verbose: bool = False,
+        learn_rounding: bool = False,
     ):
-        """ContinuousEncoder is used to encode continuous data to a range between 0 and 1.
+        """ContinuousEncoder is used to encode continuous data to a range between -1 and 1.
 
         Args:
             data (Iterable): input data to be encoded
@@ -57,6 +96,8 @@ class ContinuousEncoder(BaseEncoder):
             raise UserWarning(
                 "ContinuousEncoder only supports numeric data types."
             )
+
+        self.learn_rounding = learn_rounding
         self.mini = data.min()
         self.maxi = data.max()
         self.range = self.maxi - self.mini
@@ -66,21 +107,27 @@ class ContinuousEncoder(BaseEncoder):
             raise UserWarning("Data has no range. Cannot encode.")
         self.dtype = data.dtype
 
+        if self.learn_rounding:
+            self._rounding_digits = self.get_rounding(data)
+
         self.encoding = "continuous"
         self.size = 1
-
-        print(
-            f"{self.__class__.__name__}: min: {self.mini}, max: {self.maxi}, range: {self.range}, dtype: {self.dtype}"
-        )
+        if verbose:
+            print(
+                f"{self.__class__.__name__}: ({name}) min: {self.mini}, max: {self.maxi}, range: {self.range}, dtype: {self.dtype}"
+            )
 
     def encode(self, data: Iterable) -> Tensor:
         data = Tensor(data)
-        return (data - self.mini) / self.range
+        return (2 * (data - self.mini) / self.range) - 1
 
     def decode(self, data: Iterable) -> pl.Series:
         data = pl.Series(data)
-        new = (data * self.range) + self.mini
-        return new.cast(self.dtype)
+        data = ((data + 1) * self.range / 2) + self.mini
+        data = data.cast(self.dtype)
+        if self.learn_rounding and self._rounding_digits is not None:
+            data = data.round(self._rounding_digits)
+        return data
 
 
 class TimeEncoder(BaseEncoder):
@@ -152,7 +199,7 @@ class CategoricalTokeniser(BaseEncoder):
 
         if verbose:
             print(
-                f"{self.__class__.__name__}: size: {self.size}, categories: {self.mapping}, dtype: {self.dtype}"
+                f"{self.__class__.__name__}: ({name}) size: {self.size}, categories: {self.mapping}, dtype: {self.dtype}"
             )
             if self.size > 20:
                 print(
