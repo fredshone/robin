@@ -217,7 +217,7 @@ def argmax_sampling(xs: Tensor) -> list[Tensor]:
 
 def evaluate(
     target: pl.DataFrame, synthetic: pl.DataFrame, config: dict
-) -> pl.DataFrame:
+) -> dict:
     """Evaluate the synthetic data against the target data.
 
     Args:
@@ -230,41 +230,25 @@ def evaluate(
     """
     yx_binned, synth_binned = binning.bin_continuous(target, synthetic, bins=10)
 
-    mmae_first = density.mean_mean_absolute_error(
-        target=yx_binned,
-        synthetic=synth_binned,
-        order=1,
-        controls=config.get("data").get("controls"),
-    )
-    mmae_second = density.mean_mean_absolute_error(
-        target=yx_binned,
-        synthetic=synth_binned,
-        order=2,
-        controls=config.get("data").get("controls"),
-    )
-    mmae_third = density.mean_mean_absolute_error(
-        target=yx_binned,
-        synthetic=synth_binned,
-        order=3,
-        controls=config.get("data").get("controls"),
-    )
+    density_orders = config.get("evaluate", {}).get("densities", [1, 2, 3])
+    homogeneity = config.get("evaluate", {}).get("homogeneity", True)
+    incorrectness = config.get("evaluate", {}).get("incorrectness", True)
 
-    output = pl.DataFrame(
-        {
-            "": [
-                "MMAE (1st)",
-                "MMAE (2nd)",
-                "MMAE (3rd)",
-                "Homogeneity",
-                "Incorrectness",
-            ],
-            "Value": [
-                mmae_first,
-                mmae_second,
-                mmae_third,
-                creativity.simpsons_index(synth_binned),
-                correctness.incorrectness(yx_binned, synth_binned),
-            ],
-        }
-    )
-    return output
+    metrics = {
+        f"density_{o}": density.mean_mean_absolute_error(
+            target=yx_binned,
+            synthetic=synth_binned,
+            order=o,
+            controls=config.get("data").get("controls"),
+        )
+        for o in density_orders
+    }
+    if homogeneity:
+        metrics["homogeneity"] = creativity.simpsons_index(synth_binned)
+    if incorrectness:
+        metrics["incorrectness"] = correctness.incorrectness(
+            yx_binned, synth_binned
+        )
+    metrics["meta_score"] = sum(list(metrics.values()))
+
+    return metrics

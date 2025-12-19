@@ -1,8 +1,49 @@
+sweep:
+  description: "Demo sweep"
+  project: ethiopia-sweep
+  method: bayes  # grid or "random" or "bayes"
+  metric:
+    name: meta_score
+    goal: minimize
+
+  parameters:
+    model:
+      parameters:
+        latent_size:
+          distribution: int_uniform
+          min: 1
+          max: 24
+        beta:
+          distribution: log_uniform_values
+          min: 0.0001
+          max: 1
+        lr:
+          distribution: log_uniform_values
+          min: 0.0001
+          max: 0.1
+        dropout:
+          min: 0
+          max: 0.5
+        activation:
+          values: [True, False]
+        normalize:
+          values: [True, False]
+        depth:
+          min: 1
+          max: 4
+        hidden_size:
+          min: 8
+          max: 512
+
+    generate:
+      parameters:
+        sample:
+          values: [argmax, multinomial]
+
 seed: 12345
 
 logging:
   dir: "logs"
-  project: "ethiopia"
 
 data:
   train_path: data/ethiopia/ethiopia_data_cleaned.csv
@@ -45,7 +86,7 @@ gen_dataloader:
 model:
   latent_size: 22
   beta: 0.1
-  lr: 0.001
+  lr: 0.0001
   dropout: 0.3
   activation: True
   normalize: True
@@ -60,7 +101,7 @@ model:
     hidden_size: 256
 
 early_stopping:
-  patience: 10
+  patience: 20
 
 trainer:
   min_epochs: 10
@@ -73,6 +114,6 @@ generate:
   sample: argmax
 
 evaluate:
-  densities: [1,2,3]
+  orders: [1,2,3]
   homogeneity: True
   incorrectness: True

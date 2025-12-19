@@ -16,7 +16,8 @@ def run_command(
     config: dict,
     verbose: bool = False,
     ckpt_path: Path = None,
-    losses: bool = True,
+    test: bool = True,
+    offline: bool = False,
 ) -> None:
     """
     Train, test and generate.
@@ -25,7 +26,8 @@ def run_command(
         config (dict): The configuration dictionary.
         verbose (bool, optional): Whether to print verbose output. Defaults to False.
         ckpt_path (Path, optional): Path to a checkpoint file. Defaults to None.
-        losses (bool, optional): Whether to run tests and return losses. Defaults to True.
+        test (bool, optional): Whether to run tests and return losses. Defaults to True.
+        offline (bool, optional): Run logger in offline mode. Defaults to False.
 
     Returns:
         None
@@ -33,7 +35,6 @@ def run_command(
     """
     save_dir = Path(config.get("logging", {}).get("dir", "logs"))
     project = str(config.get("logging", {}).get("project"))
-    name = str(config.get("logging", {}).get("name"))
 
     # create directories
     save_dir.mkdir(exist_ok=True, parents=True)
@@ -42,7 +43,10 @@ def run_command(
     with open(save_dir / "config.yaml", "w") as file:
         yaml.dump(config, file)
 
-    logger = WandbLogger(save_dir=save_dir, project=project, name=name)
+    logger = WandbLogger(
+        save_dir=save_dir, project=project, config=config, offline=offline
+    )
+    config = dict(logger.experiment.config)
 
     seed = config.pop("seed", seeder())
     torch.manual_seed(seed)
@@ -75,10 +79,9 @@ def run_command(
 
     root = Path(trainer.checkpoint_callback.dirpath).parent
 
-    if losses:
+    if test:
         loss = helpers.run_tests(trainer=trainer, ckpt_path=ckpt_path)
-        with open(root / "losses.yaml", "w") as file:
-            yaml.dump(loss, file)
+        logger.experiment.summary.update(loss)
 
     data_dir = root / "data"
     data_dir.mkdir(exist_ok=True)
@@ -101,6 +104,27 @@ def run_command(
     )
 
     metrics = helpers.evaluate(target=yx, synthetic=synth, config=config)
-    with pl.Config(tbl_hide_dataframe_shape=True):
-        print(metrics)
-    metrics.write_csv(data_dir / "eval_metrics.csv")
+    logger.experiment.summary.update(metrics)
+
+    with open(root / "summary.yaml", "w") as file:
+        yaml.dump(logger.experiment.summary, file)
+
+    return logger
+
+
+def print_summary(logger: WandbLogger):
+
+    print("\n=== Summary ===")
+    for k, v in dict(logger.experiment.summary).items():
+        if v is None:
+            print(f"  {k:>18}: (none)")
+        elif isinstance(v, float):
+            # Format floats with reasonable precision
+            if "accuracy" in k or "meta_score" in k:
+                print(f"  {k:>18}: {v:.6f}")
+            elif "minutes" in k:
+                print(f"  {k:>18}: {v:.2f}")
+            else:
+                print(f"  {k:>18}: {v:.6f}")
+        else:
+            print(f"  {k:>18}: {v}")
