@@ -52,15 +52,13 @@ model:
   latent_size: 20
   beta: 1
   lr: 0.1
+  hidden_size: 64
   controls_encoder:
     depth: 4
-    hidden_size: 64
   encoder:
     depth: 4
-    hidden_size: 64
   decoder:
     depth: 4
-    hidden_size: 64
 
 trainer:
   min_epochs: 5

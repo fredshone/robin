@@ -49,15 +49,13 @@ model:
   dropout: 0.3
   activation: True
   normalize: True
+  hidden_size: 256
   controls_encoder:
     depth: 3
-    hidden_size: 256
   encoder:
     depth: 2
-    hidden_size: 256
   decoder:
     depth: 2
-    hidden_size: 256
 
 early_stopping:
   patience: 10

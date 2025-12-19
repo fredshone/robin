@@ -61,9 +61,7 @@ def build_model(
         depth=model_params.get("controls_encoder", {}).get(
             "depth", defaults.DEPTH
         ),
-        hidden_size=model_params.get("controls_encoder", {}).get(
-            "hidden_size", defaults.WIDTH
-        ),
+        hidden_size=model_params.get("hidden_size", defaults.WIDTH),
         activation=activation,
         normalize=normalize,
         dropout=dropout,
@@ -74,9 +72,7 @@ def build_model(
         encoder_types=x_encoder.types(),
         encoder_sizes=x_encoder.sizes(),
         depth=model_params.get("encoder", {}).get("depth", defaults.DEPTH),
-        hidden_size=model_params.get("encoder", {}).get(
-            "hidden_size", defaults.WIDTH
-        ),
+        hidden_size=model_params.get("hidden_size", defaults.WIDTH),
         latent_size=model_params.get("latent_size", defaults.LATENT_SIZE),
         activation=activation,
         normalize=normalize,
@@ -86,9 +82,7 @@ def build_model(
         encoder_types=x_encoder.types(),
         encoder_sizes=x_encoder.sizes(),
         depth=model_params.get("decoder", {}).get("depth", defaults.DEPTH),
-        hidden_size=model_params.get("decoder", {}).get(
-            "hidden_size", defaults.WIDTH
-        ),
+        hidden_size=model_params.get("hidden_size", defaults.WIDTH),
         latent_size=model_params.get("latent_size", defaults.LATENT_SIZE),
         activation=activation,
         normalize=normalize,
@@ -135,10 +129,6 @@ def run_tests(trainer: Trainer, ckpt_path: Optional[str] = None) -> dict:
         ckpt_path = "best"
 
     losses = {}
-
-    # losses["train"] = trainer.test(
-    #     ckpt_path=ckpt_path, dataloaders=trainer.datamodule.train_dataloader()
-    # )
 
     losses["val"] = trainer.validate(
         ckpt_path=ckpt_path, dataloaders=trainer.datamodule.val_dataloader()

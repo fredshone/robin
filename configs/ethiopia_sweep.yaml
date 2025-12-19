@@ -28,12 +28,28 @@ sweep:
           values: [True, False]
         normalize:
           values: [True, False]
-        depth:
-          min: 1
-          max: 4
         hidden_size:
           min: 8
           max: 512
+          
+        controls_encoder:
+          parameters:
+            depth:
+              min: 1
+              max: 4
+
+        encoder:
+          parameters:
+            depth:
+              min: 1
+              max: 4
+
+        decoder:
+          parameters:
+            depth:
+              min: 1
+              max: 4
+
 
     generate:
       parameters:
