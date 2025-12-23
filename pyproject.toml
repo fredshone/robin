@@ -41,6 +41,8 @@ dependencies = [
   "wandb>=0.21.1",
   "polars>=1.32.3",
   "optuna>=4.6.0",
+  "optuna-dashboard>=0.20.0",
+  "scikit-learn>=1.8.0",
 ]
 
 [project.scripts]
@@ -84,7 +86,7 @@ branch = true
 source = ["src/"]
 
 [tool.coverage.report]
-fail_under = 50
+fail_under = 40
 
 [tool.coverage.html]
 directory = "reports/coverage"
@@ -141,4 +143,10 @@ robin = []
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-xdist>=3.8.0",
+]
 

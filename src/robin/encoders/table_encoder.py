@@ -6,10 +6,11 @@ import polars as pl
 from torch import Tensor, stack
 from torch.utils.data import Dataset
 
-from robin.encoders.base import CategoricalTokeniser, ContinuousEncoder
+from robin.encoders.base import CategoricalTokeniser, MinMaxEncoder
+from robin.encoders.gmm_encoder import GMMEncoder
 
 
-class CensusDataset(Dataset):
+class TableDataset(Dataset):
     def __init__(self, data: Tensor):
         self.data = data
 
@@ -31,16 +32,24 @@ class TableEncoder:
         include: Optional[list] = None,
         exclude: Optional[list] = None,
         verbose: bool = False,
+        enable_decomposed_continuous: bool = False,
+        learn_rounding_scheme: bool = False,
+        enforce_min_max_values: bool = False,
     ):
-        """Tokenise a dataframe into a Tensor,
+        """Encode a dataframe into a Tensor,
         and initialise mapping for further encoding and decoding.
         Args:
             data (Union[pl.DataFrame, pd.DataFrame]): input dataframe to tokenise.
             include (list, optional): columns to include. Defaults to None.
             exclude (list, optional): columns to exclude. Defaults to None.
+            verbose (bool, optional): print the configuration. Defaults to False.
         """
 
         self.verbose = verbose
+        self.enable_decomposed_continuous = enable_decomposed_continuous
+        self.learn_rounding = learn_rounding_scheme
+        self.enforce_min_max = enforce_min_max_values
+
         columns = data.columns
         columns = [col for col in columns if col not in ["pid", "iid", "hid"]]
         if include is not None:
@@ -87,20 +96,20 @@ class TableEncoder:
                 self.encoders[column] = CategoricalTokeniser(
                     data[column], column, verbose=verbose
                 )
-            elif -8 in values or values.n_unique() < 25:
-                self.encoders[column] = CategoricalTokeniser(
-                    data[column], column, verbose=verbose
+            elif dtype.is_numeric() and self.enable_decomposed_continuous:
+                self.encoders[column] = GMMEncoder(
+                    data[column],
+                    column,
+                    verbose=verbose,
+                    learn_rounding=self.learn_rounding,
+                    enforce_min_max=self.enforce_min_max,
                 )
-            elif dtype in [
-                pl.Int8,
-                pl.Int16,
-                pl.Int32,
-                pl.Int64,
-                pl.Float32,
-                pl.Float64,
-            ]:
-                self.encoders[column] = ContinuousEncoder(
-                    data[column], column, verbose=verbose
+            elif dtype.is_numeric():
+                self.encoders[column] = MinMaxEncoder(
+                    data[column],
+                    column,
+                    verbose=verbose,
+                    learn_rounding=self.learn_rounding,
                 )
             else:
                 raise UserWarning(
@@ -128,13 +137,23 @@ class TableEncoder:
                 self.encoders[column] = CategoricalTokeniser(
                     data[column], column, verbose=verbose
                 )
-            elif -8 in values or values.nunique() < 25:
-                self.encoders[column] = CategoricalTokeniser(
-                    data[column], column, verbose=verbose
+            elif (
+                ptypes.is_numeric_dtype(values)
+                and self.enable_decomposed_continuous
+            ):
+                self.encoders[column] = GMMEncoder(
+                    data[column],
+                    column,
+                    verbose=verbose,
+                    learn_rounding=self.learn_rounding,
+                    enforce_min_max=self.enforce_min_max,
                 )
             elif ptypes.is_numeric_dtype(values):
-                self.encoders[column] = ContinuousEncoder(
-                    data[column], column, verbose=verbose
+                self.encoders[column] = MinMaxEncoder(
+                    data[column],
+                    column,
+                    verbose=verbose,
+                    learn_rounding=self.learn_rounding,
                 )
             else:
                 raise UserWarning(
@@ -159,7 +178,7 @@ class TableEncoder:
             raise UserWarning("No encodings found.")
 
         encoded = stack(encoded, dim=-1).float()
-        dataset = CensusDataset(encoded)
+        dataset = TableDataset(encoded)
         if self.verbose:
             print(f"{self} encoded -> {dataset}")
         return dataset  # todo: weights
@@ -214,7 +233,7 @@ class TableEncoder:
         Returns:
             Union[pd.DataFrame, pl.DataFrame]: decoded dataframe.
         """
-        decoded = {"pid": list(range(data.shape[0]))}
+        decoded = {}
         for i, (name, encoder) in enumerate(self.encoders.items()):
             tokens = data[:, i]
             decoded[name] = encoder.decode(tokens)

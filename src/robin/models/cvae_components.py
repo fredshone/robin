@@ -3,7 +3,7 @@ from typing import Tuple
 from torch import Tensor, nn, stack
 
 
-class LabelsEncoderBlock(nn.Module):
+class ControlsEncoderBlock(nn.Module):
     def __init__(
         self,
         encoder_types: list,
@@ -55,10 +55,11 @@ class CVAEEncoderBlock(nn.Module):
             normalize=normalize,
             dropout=dropout,
         )
+        self.batch_norm = nn.BatchNorm1d(hidden_size)
         self.fc_mu = nn.Linear(hidden_size, latent_size)
         self.fc_var = nn.Linear(hidden_size, latent_size)
 
-    def forward(self, x: Tensor, hidden_y: Tensor) -> Tuple[Tensor, Tensor]:
+    def forward(self, hidden_y: Tensor, x: Tensor) -> Tuple[Tensor, Tensor]:
         h = self.embed(x)
         h = h + hidden_y
         h = self.ff(h)
@@ -93,7 +94,7 @@ class CVAEDecoderBlock(nn.Module):
         for type, size in zip(encoder_types, encoder_sizes):
             if type == "continuous":
                 embeds.append(
-                    nn.Sequential(nn.Linear(hidden_size, 1), nn.Sigmoid())
+                    nn.Sequential(nn.Linear(hidden_size, 1))  # , nn.Sigmoid())
                 )
             if type == "categorical":
                 embeds.append(
@@ -103,10 +104,10 @@ class CVAEDecoderBlock(nn.Module):
                 )
         self.embeds = nn.ModuleList(embeds)
 
-    def forward(self, z: Tensor, hidden_y: Tensor) -> Tensor:
+    def forward(self, hidden_y: Tensor, z: Tensor) -> Tensor:
         h = self.ff(z)
         h = h + hidden_y
-        xs = [embed(h) for embed in self.embeds]
+        xs = [embed(h).squeeze(1) for embed in self.embeds]
         return xs
 
 
@@ -126,16 +127,19 @@ class Embedder(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         # TODO: need to remove if statements and loop for speed
         xs = []
-        for i, (embed_type, embed) in enumerate(zip(self.encoder_types, self.embeds)):
-            col = x[:, i]
+        for i, (embed_type, embed) in enumerate(
+            zip(self.encoder_types, self.embeds)
+        ):
+            col = x[:, i : i + 1]
             if embed_type == "categorical":
                 # TODO: need to separate x_cat and x_cont in future to remove if statement
                 col = col.long()
-            xs.append(embed(col))
+            embedded = embed(col)
+            xs.append(embedded)
         # consider splitting categorical and continuous in future
         xs = stack(xs, dim=-1)
         xs = xs.sum(dim=-1)
-        return xs
+        return xs.squeeze(1)
 
 
 class Noop(nn.Module):
@@ -185,4 +189,4 @@ class NumericEmbed(nn.Module):
         self.fc = nn.Linear(1, hidden_size)
 
     def forward(self, x):
-        return self.fc(x)
+        return self.fc(x).unsqueeze(1)
