@@ -57,6 +57,7 @@ def build_model(
     # encoder block to embed labels into vec with hidden size
     labels_encoder_block = ControlsEncoderBlock(
         encoder_types=y_encoder.types(),
+        slot_idxs=y_encoder.slot_idxs(),
         encoder_sizes=y_encoder.sizes(),
         depth=model_params.get("controls_encoder", {}).get(
             "depth", defaults.DEPTH
@@ -70,6 +71,7 @@ def build_model(
     # encoder and decoder block to process census data
     encoder = CVAEEncoderBlock(
         encoder_types=x_encoder.types(),
+        slot_idxs=x_encoder.slot_idxs(),
         encoder_sizes=x_encoder.sizes(),
         depth=model_params.get("encoder", {}).get("depth", defaults.DEPTH),
         hidden_size=model_params.get("hidden_size", defaults.WIDTH),
@@ -92,6 +94,7 @@ def build_model(
     model = CVAE(
         embedding_names=x_encoder.names(),
         embedding_types=x_encoder.types(),
+        slot_idxs=x_encoder.slot_idxs(),
         embedding_weights=x_encoder.weights(),
         labels_encoder_block=labels_encoder_block,
         encoder_block=encoder,

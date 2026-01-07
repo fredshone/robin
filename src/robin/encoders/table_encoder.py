@@ -3,7 +3,7 @@ from typing import List, Optional, Union
 import pandas as pd
 import pandas.api.types as ptypes
 import polars as pl
-from torch import Tensor, stack
+from torch import Tensor, cat
 from torch.utils.data import Dataset
 
 from robin.encoders.base import CategoricalTokeniser, MinMaxEncoder
@@ -15,7 +15,7 @@ class TableDataset(Dataset):
         self.data = data
 
     def __repr__(self):
-        return f"{super().__repr__()}: {self.data.shape}"
+        return f"Table Dataset: {self.data.shape}"
 
     def __getitem__(self, index):
         return self.data[index]
@@ -170,17 +170,19 @@ class TableEncoder:
         encoded = []
         for column, encoder in self.encoders.items():
             if column not in data.columns:
-                raise UserWarning(f"Column '{column}' not found in data")
+                raise UserWarning(
+                    f"Expected column '{column}' based on configuration, but not found in data"
+                )
             column_encoded = encoder.encode(data[column])
             encoded.append(column_encoded)
 
         if not encoded:
             raise UserWarning("No encodings found.")
 
-        encoded = stack(encoded, dim=-1).float()
+        encoded = cat(encoded, dim=-1).float()
         dataset = TableDataset(encoded)
         if self.verbose:
-            print(f"{self} encoded -> {dataset}")
+            print(f"{self} encoded: {dataset}")
         return dataset  # todo: weights
 
     def encode_series(self, data: pd.Series) -> Tensor:
@@ -210,6 +212,25 @@ class TableEncoder:
         """
         return [encoder.encoding for encoder in self.encoders.values()]
 
+    def slot_sizes(self) -> List[int]:
+        """Get the slot sizes of the embeddings.
+        Returns:
+            List[int]: list of slot sizes of the embeddings.
+        """
+        return [encoder.slot_size for encoder in self.encoders.values()]
+
+    def slot_idxs(self) -> List[int]:
+        """Get the slot locations of the embeddings.
+        Returns:
+            List[int]: list of slot locations of the embeddings.
+        """
+        idxs = [0]
+        for s in self.slot_sizes():
+            idxs.append(idxs[-1] + s)
+        starts = idxs[:-1]
+        ends = idxs[1:]
+        return list(zip(starts, ends))
+
     def sizes(self) -> List[int]:
         """Get the sizes of the embeddings.
         Returns:
@@ -234,8 +255,10 @@ class TableEncoder:
             Union[pd.DataFrame, pl.DataFrame]: decoded dataframe.
         """
         decoded = {}
-        for i, (name, encoder) in enumerate(self.encoders.items()):
-            tokens = data[:, i]
+        for (name, encoder), (i, j) in zip(
+            self.encoders.items(), self.slot_idxs()
+        ):
+            tokens = data[:, i:j]
             decoded[name] = encoder.decode(tokens)
         decoded = (
             pd.DataFrame(decoded)

@@ -1,12 +1,13 @@
 from typing import Tuple
 
-from torch import Tensor, nn, stack
+from torch import Tensor, cat, nn, stack
 
 
 class ControlsEncoderBlock(nn.Module):
     def __init__(
         self,
         encoder_types: list,
+        slot_idxs: list,
         encoder_sizes: list,
         depth: int,
         hidden_size: int,
@@ -15,7 +16,9 @@ class ControlsEncoderBlock(nn.Module):
         dropout: float = 0.0,
     ):
         super().__init__()
-        self.embed = Embedder(encoder_types, encoder_sizes, hidden_size)
+        self.embed = Embedder(
+            encoder_types, slot_idxs, encoder_sizes, hidden_size
+        )
         self.ff = FFBlock(
             hidden_size,
             hidden_size,
@@ -36,6 +39,7 @@ class CVAEEncoderBlock(nn.Module):
     def __init__(
         self,
         encoder_types: list,
+        slot_idxs: list,
         encoder_sizes: list,
         depth: int,
         hidden_size: int,
@@ -45,7 +49,9 @@ class CVAEEncoderBlock(nn.Module):
         dropout: float = 0.0,
     ):
         super().__init__()
-        self.embed = Embedder(encoder_types, encoder_sizes, hidden_size)
+        self.embed = Embedder(
+            encoder_types, slot_idxs, encoder_sizes, hidden_size
+        )
         self.ff = FFBlock(
             hidden_size,
             hidden_size,
@@ -94,14 +100,19 @@ class CVAEDecoderBlock(nn.Module):
         for type, size in zip(encoder_types, encoder_sizes):
             if type == "continuous":
                 embeds.append(
-                    nn.Sequential(nn.Linear(hidden_size, 1))  # , nn.Sigmoid())
+                    nn.Sequential(nn.Linear(hidden_size, 1), nn.Tanh())
                 )
-            if type == "categorical":
+            elif type == "categorical":
                 embeds.append(
                     nn.Sequential(
                         nn.Linear(hidden_size, size), nn.LogSoftmax(dim=-1)
                     )
                 )
+            elif type == "decomposed":
+                embeds.append(DecomoposedDecoder(hidden_size, size))
+            else:
+                raise ValueError(f"Unknown encoder type: {type}")
+
         self.embeds = nn.ModuleList(embeds)
 
     def forward(self, hidden_y: Tensor, z: Tensor) -> Tensor:
@@ -112,34 +123,42 @@ class CVAEDecoderBlock(nn.Module):
 
 
 class Embedder(nn.Module):
-    def __init__(self, encoder_types: list, encoder_sizes: list, embed_size):
+    def __init__(
+        self,
+        encoder_types: list,
+        slot_idxs: list,
+        encoder_sizes: list,
+        embed_size,
+    ):
         super().__init__()
         self.encoder_types = encoder_types
+        self.slot_idxs = slot_idxs
         embeds = []
 
         for encoding_type, size in zip(encoder_types, encoder_sizes):
-            if encoding_type == "continuous":
-                embeds.append(NumericEmbed(embed_size))
             if encoding_type == "categorical":
-                embeds.append(nn.Embedding(size, embed_size))
+                embeds.append(CatEmbedding(size, embed_size))
+
+            elif encoding_type == "continuous":
+                embeds.append(NumericEmbedding(embed_size))
+
+            elif encoding_type == "decomposed":
+                embeds.append(DecomposedEmbedding(size, embed_size))
+
         self.embeds = nn.ModuleList(embeds)
 
     def forward(self, x: Tensor) -> Tensor:
-        # TODO: need to remove if statements and loop for speed
+        # TODO: need to remove loop for speed
         xs = []
-        for i, (embed_type, embed) in enumerate(
-            zip(self.encoder_types, self.embeds)
-        ):
-            col = x[:, i : i + 1]
-            if embed_type == "categorical":
-                # TODO: need to separate x_cat and x_cont in future to remove if statement
-                col = col.long()
+        for embed, (i, j) in zip(self.embeds, self.slot_idxs):
+            col = x[:, i:j]
+            # TODO: need to separate x_cat and x_cont
             embedded = embed(col)
             xs.append(embedded)
         # consider splitting categorical and continuous in future
         xs = stack(xs, dim=-1)
         xs = xs.sum(dim=-1)
-        return xs.squeeze(1)
+        return xs
 
 
 class Noop(nn.Module):
@@ -183,10 +202,44 @@ class FFBlock(nn.Module):
         return self.block(x)
 
 
-class NumericEmbed(nn.Module):
+class CatEmbedding(nn.Module):
+    def __init__(self, num_embeddings, hidden_size):
+        super().__init__()
+        self.embedding = nn.Embedding(num_embeddings, hidden_size)
+
+    def forward(self, x):
+        return self.embedding(x.long()).squeeze(1)
+
+
+class NumericEmbedding(nn.Module):
     def __init__(self, hidden_size):
         super().__init__()
         self.fc = nn.Linear(1, hidden_size)
 
     def forward(self, x):
-        return self.fc(x).unsqueeze(1)
+        return self.fc(x)
+
+
+class DecomposedEmbedding(nn.Module):
+    def __init__(self, num_embeddings, hidden_size):
+        super().__init__()
+        self.fc = nn.Linear(1, hidden_size)
+        self.embedding = nn.Embedding(num_embeddings, hidden_size)
+
+    def forward(self, x):
+        v, k = x[:, 0:1], x[:, 1:2].long()
+        return self.fc(v) + self.embedding(k).squeeze(1)
+
+
+class DecomoposedDecoder(nn.Module):
+    def __init__(self, hidden_size, size):
+        super().__init__()
+        self.value_net = nn.Sequential(nn.Linear(hidden_size, 1), nn.Tanh())
+        self.composition_net = nn.Sequential(
+            nn.Linear(hidden_size, size), nn.LogSoftmax(dim=-1)
+        )
+
+    def forward(self, x):
+        v = self.value_net(x)
+        k = self.composition_net(x)
+        return cat([v, k], dim=-1)

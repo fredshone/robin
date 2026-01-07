@@ -9,7 +9,7 @@ from robin.encoders.base import BaseEncoder
 
 
 class GMMEncoder(BaseEncoder):
-    """Transformer for numerical data using a Bayesian Gaussian Mixture Model.
+    """Encoder (Transformer) for numerical data using a Bayesian Gaussian Mixture Model.
 
     This transformation takes a numerical value and transforms it using a Bayesian GMM
     model. It generates two outputs, a discrete value which indicates the selected
@@ -57,15 +57,16 @@ class GMMEncoder(BaseEncoder):
         self.max_components = max_components
         self.weight_threshold = weight_threshold
         self.seed = seed if seed is not None else 12345
+        self.size = None
         self._fit(data)
 
         self.dtype = data.dtype
         self.encoding = "decomposed"
-        self.size = sum(self.threshold_indices) + 1
+        self.slot_size = 2
 
         if verbose:
             print(
-                f"{self.__class__.__name__}: ({name}) max_clusters: {self.max_components}, weight_threshold: {self.weight_threshold}"
+                f"{self.__class__.__name__}: ({name}) clusters: {self.size}/{self.max_components}"
             )
 
     def _fit(self, data: pl.Series):
@@ -77,8 +78,9 @@ class GMMEncoder(BaseEncoder):
         """
         self.transformer = BayesianGaussianMixture(
             n_components=self.max_components,
+            max_iter=1000,
             weight_concentration_prior_type="dirichlet_process",
-            weight_concentration_prior=0.001,
+            weight_concentration_prior=None,
             random_state=self.seed,
         )
 
@@ -97,6 +99,7 @@ class GMMEncoder(BaseEncoder):
         self.threshold_indices = (
             self.transformer.weights_ > self.weight_threshold
         )
+        self.size = sum(self.threshold_indices)
 
     def encode(self, data: pl.Series) -> Tensor:
         """Transform the numerical data.
@@ -152,11 +155,20 @@ class GMMEncoder(BaseEncoder):
         data = np.array(data)
 
         means = self.transformer.means_.reshape([-1])
+        print("means shape", means.shape)
         stds = np.sqrt(self.transformer.covariances_).reshape([-1])
+        print("stds shape", stds.shape)
 
         # first col [:,0] is value, second col [:,1] is component
         normalized = np.clip(data[:, 0], -1, 1)
+        print("norms", normalized.shape, normalized.min(), normalized.max())
         selected_component = data[:, 1].round().astype(int)
+        print(
+            "selected_component",
+            selected_component.shape,
+            selected_component.max(),
+        )
+        print("threshold_indices", self.threshold_indices.shape)
 
         std_t = stds[self.threshold_indices][selected_component]
         mean_t = means[self.threshold_indices][selected_component]

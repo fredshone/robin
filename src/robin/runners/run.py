@@ -53,9 +53,10 @@ def run_command(
 
     yx = helpers.load_data(config)
     y, x = helpers.split_data(config, yx)
-    x_encoder = TableEncoder(x, verbose=verbose)
+    encoder_config = config.get("encoder", {})
+    x_encoder = TableEncoder(x, verbose=verbose, **encoder_config)
     x_dataset = x_encoder.encode(data=x)
-    y_encoder = TableEncoder(y, verbose=verbose)
+    y_encoder = TableEncoder(y, verbose=verbose, **encoder_config)
     y_dataset = y_encoder.encode(data=y)
 
     yx_dataset = YXDataset(y_dataset, x_dataset)

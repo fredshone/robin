@@ -1,9 +1,9 @@
 from typing import Optional
 
 import click
+import wandb
 import yaml
 
-import wandb
 from robin.runners.run import print_summary, run_command
 from robin.runners.tune import tune_command
 

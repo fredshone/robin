@@ -10,6 +10,10 @@ MAX_DECIMALS = sys.float_info.dig
 
 
 class BaseEncoder:
+    dtype = None
+    encoding = None
+    size = None
+    activation = None
 
     def __init__(self, data: Iterable, name: Optional[str] = None):
         raise NotImplementedError(
@@ -111,6 +115,7 @@ class MinMaxEncoder(BaseEncoder):
             self._rounding_digits = self.get_rounding(data)
 
         self.encoding = "continuous"
+        self.slot_size = 1
         self.size = 1
         if verbose:
             print(
@@ -118,7 +123,7 @@ class MinMaxEncoder(BaseEncoder):
             )
 
     def encode(self, data: Iterable) -> Tensor:
-        data = Tensor(data)
+        data = Tensor(data).unsqueeze(-1)
         return (2 * (data - self.mini) / self.range) - 1
 
     def decode(self, data: Iterable) -> pl.Series:
@@ -128,54 +133,6 @@ class MinMaxEncoder(BaseEncoder):
         if self.learn_rounding and self._rounding_digits is not None:
             data = data.round(self._rounding_digits)
         return data
-
-
-class TimeEncoder(BaseEncoder):
-    def __init__(
-        self,
-        data: Iterable,
-        name: Optional[str] = None,
-        min_value: float = 0,
-        cycle: float = 1440,
-        verbose: bool = False,
-    ):
-        """TimeEncoder is used to encode continuous data to a range between 0 and 1.
-
-        Args:
-            data (Iterable): input data to be encoded
-            name (str, optional): name of the encoder. Defaults to None.
-            min_value (float, optional): minimum value of the encoder. Defaults to 0.
-            cycle (float, optional): range of the encoder. Defaults to 1440.
-            verbose (bool, optional): print the encoder configuration. Defaults to False.
-        Raises:
-            UserWarning: If the data is not of type int or float.
-        """
-        if not data.dtype.is_numeric():
-            raise UserWarning("TimeEncoder only supports numeric data types.")
-        if cycle <= 0:
-            raise UserWarning("Cycle must be larger than 0.")
-        self.mini = min_value
-        self.cycle = cycle
-        self.mean = data.mean()
-        self.std = data.std()
-        self.dtype = data.dtype
-
-        self.encoding = "time"
-        self.size = 1
-
-        if verbose:
-            print(
-                f"{self.__class__.__name__}: min: {self.mini}, range: {self.cycle}, dtype: {self.dtype}"
-            )
-
-    def encode(self, data: Iterable) -> Tensor:
-        data = Tensor(data)
-        return (data - self.mini) / self.cycle
-
-    def decode(self, data: Iterable) -> pl.Series:
-        data = pl.Series(data)
-        new = data * self.cycle + self.mini
-        return new.astype(self.dtype)
 
 
 class CategoricalTokeniser(BaseEncoder):
@@ -195,6 +152,7 @@ class CategoricalTokeniser(BaseEncoder):
         self.encoded, self.mapping = tokenize(data)
 
         self.encoding = "categorical"
+        self.slot_size = 1
         self.size = len(self.mapping)
 
         if verbose:
@@ -219,10 +177,10 @@ class CategoricalTokeniser(BaseEncoder):
         return freq
 
     def encode(self, data: Iterable) -> Tensor:
-        return tokenize(data, self.mapping)[0]
+        return tokenize(data, self.mapping)[0].unsqueeze(-1)
 
     def decode(self, data: Iterable, safe: bool = True) -> pl.Series:
-        data = pl.Series(data).cast(pl.Int8)
+        data = pl.Series(data.squeeze(-1)).cast(pl.Int8)
         reverse_mapping = {v: k for k, v in self.mapping.items()}
         if safe:
             missing = set(data.unique()) - set(reverse_mapping.keys())
