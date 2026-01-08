@@ -101,6 +101,7 @@ def build_model(
         decoder_block=decoder,
         beta=model_params.get("beta", defaults.DEFAULT_BETA),
         lr=model_params.get("lr", defaults.DEFAULT_LR),
+        sampler=model_params.get("sampler", defaults.SAMPLER),
         verbose=verbose,
     )
     if ckpt_path:
@@ -161,7 +162,7 @@ def generate(
 ) -> Tuple[Tensor, Tensor, Tensor]:
     ys, xs, zs = zip(*trainer.predict(dataloaders=dataloader, ckpt_path="best"))
     ys = concat(ys)
-    xs = [concat(x) for x in zip(*xs)]
+    xs = concat(xs)
     zs = concat(zs)
     return ys, xs, zs
 

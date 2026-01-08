@@ -28,9 +28,10 @@ data:
   ]
 
 encoder:
-  enable_decomposed_continuous: True
-  learn_rounding_scheme: False
-  enforce_min_max_values: False
+  enable_decomposed_continuous: False
+  max_components: 10
+  learn_rounding_scheme: True
+  enforce_min_max_values: True
 
 datamodule:
   val_split: 0.1
@@ -61,19 +62,19 @@ model:
     depth: 2
   decoder:
     depth: 2
+  sampler: sample
 
 early_stopping:
   patience: 10
 
 trainer:
-  min_epochs: 10
-  max_epochs: 10
+  min_epochs: 3
+  max_epochs: 3
   check_val_every_n_epoch: 1
   log_every_n_steps: 10
 
 generate:
   target_path: None
-  sample: argmax
 
 evaluate:
   densities: [1,2,3]

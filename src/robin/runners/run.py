@@ -92,7 +92,6 @@ def run_command(
     ys, xs, zs = helpers.generate(
         config, dataloader=gen_loader, trainer=trainer
     )
-    xs = helpers.sample(config, xs)
 
     y_synth = y_encoder.decode(ys)
     x_synth = x_encoder.decode(xs)

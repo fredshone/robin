@@ -235,11 +235,11 @@ class DecomoposedDecoder(nn.Module):
     def __init__(self, hidden_size, size):
         super().__init__()
         self.value_net = nn.Sequential(nn.Linear(hidden_size, 1), nn.Tanh())
-        self.composition_net = nn.Sequential(
+        self.component_net = nn.Sequential(
             nn.Linear(hidden_size, size), nn.LogSoftmax(dim=-1)
         )
 
     def forward(self, x):
         v = self.value_net(x)
-        k = self.composition_net(x)
+        k = self.component_net(x)
         return cat([v, k], dim=-1)

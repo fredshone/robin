@@ -2,7 +2,7 @@ from typing import List, Optional
 
 import torch
 from pytorch_lightning import LightningModule
-from torch import Tensor, nn, optim
+from torch import Tensor, exp, nn, optim
 
 
 class CVAE(LightningModule):
@@ -17,6 +17,7 @@ class CVAE(LightningModule):
         beta: float,
         lr: float,
         embedding_weights: Optional[list] = None,
+        sampler: Optional[str] = None,
         verbose: bool = False,
     ):
         super().__init__()
@@ -33,6 +34,7 @@ class CVAE(LightningModule):
             self.embedding_weights = embedding_weights
         else:
             self.embedding_weights = [None] * len(embedding_names)
+        self.sampler = sampler
 
         self.labels_encoder_block = labels_encoder_block
         self.encoder_block = encoder_block
@@ -108,6 +110,7 @@ class CVAE(LightningModule):
                 verbose_metrics[f"recon_decomposed_{name}"] = loss
             else:
                 raise ValueError(f"Unknown encoding for {name}, type: {etype}")
+
         recon = sum(recons) / len(recons)
         b_recon = (1 - self.beta) * recon
 
@@ -135,15 +138,45 @@ class CVAE(LightningModule):
 
     def predict(self, y: Tensor, z: Tensor, **kwargs) -> List[Tensor]:
         h_y = self.labels_encoder_block(y)
-        prob_samples = [
-            torch.exp(probs) for probs in self.decode(h_y, z, **kwargs)
-        ]
-        return y, prob_samples, z
+        log_probs = self.decode(h_y, z, **kwargs)
 
-    def infer(self, y: Tensor, x: Tensor, **kwargs) -> Tensor:
-        log_probs_x, _, _, z = self.forward(y, x, **kwargs)
-        prob_samples = torch.exp(log_probs_x)
-        return prob_samples, z
+        if self.sampler is None:
+            raise ValueError(
+                "Sampler method must be specified in model config for generation."
+            )
+
+        sampler = {
+            "argmax": torch.argmax,
+            "sample": multinomial_sampler,
+            "multinomial": multinomial_sampler,
+        }.get(self.sampler)
+
+        if sampler is None:
+            raise ValueError(f"Unknown sampling method: {self.sampler}")
+
+        preds = []
+        for name, etype, lprobs in zip(
+            self.embedding_names, self.embedding_types, log_probs
+        ):
+            if etype == "continuous":
+                preds.append(lprobs.unsqueeze(-1))
+            elif etype == "categorical":
+                preds.append(sampler(lprobs, dim=1).unsqueeze(-1))
+            elif etype == "decomposed":
+                v, k = lprobs[:, 0], lprobs[:, 1:]
+                compoments = sampler(k, dim=1)
+                preds.append(torch.stack([v, compoments], dim=1))
+            else:
+                raise ValueError(f"Unknown encoding for {name}, type: {etype}")
+
+        preds = torch.cat(preds, dim=1)
+
+        return y, preds, z
+
+    # def infer(self, y: Tensor, x: Tensor, **kwargs) -> Tensor:
+    #     log_probs_x, _, _, z = self.forward(y, x, **kwargs)
+    #     prob_samples = torch.exp(log_probs_x)
+    #     return prob_samples, z
 
     def training_step(self, batch, batch_idx):
         y, x = batch
@@ -199,10 +232,14 @@ class DecomposedLoss(nn.Module):
     def forward(self, log_probs: List[Tensor], target: Tensor) -> Tensor:
         continuous_target = target[:, 0]
         categorical_target = target[:, 1].long()
-        continuous_preds = torch.exp(log_probs[:, 0])
+        continuous_preds = log_probs[:, 0]
         categorical_preds = log_probs[:, 1:]
 
         mse = self.mse_loss(continuous_preds, continuous_target)
         nll = self.nll_loss(categorical_preds, categorical_target)
 
         return mse + nll
+
+
+def multinomial_sampler(log_probs: Tensor, dim: int) -> Tensor:
+    return torch.multinomial(exp(log_probs), num_samples=1).squeeze(-1)

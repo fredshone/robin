@@ -100,7 +100,8 @@ class MinMaxEncoder(BaseEncoder):
             raise UserWarning(
                 "ContinuousEncoder only supports numeric data types."
             )
-
+        self.name = name
+        self.verbose = verbose
         self.learn_rounding = learn_rounding
         self.mini = data.min()
         self.maxi = data.max()
@@ -117,18 +118,17 @@ class MinMaxEncoder(BaseEncoder):
         self.encoding = "continuous"
         self.slot_size = 1
         self.size = 1
-        if verbose:
-            print(
-                f"{self.__class__.__name__}: ({name}) min: {self.mini}, max: {self.maxi}, range: {self.range}, dtype: {self.dtype}"
-            )
+
+    def __str__(self):
+        return f"{self.__class__.__name__}: ({self.name}) min: {self.mini}, max: {self.maxi}, range: {self.range}, dtype: {self.dtype}"
 
     def encode(self, data: Iterable) -> Tensor:
         data = Tensor(data).unsqueeze(-1)
         return (2 * (data - self.mini) / self.range) - 1
 
     def decode(self, data: Iterable) -> pl.Series:
-        data = pl.Series(data)
-        data = ((data + 1) * self.range / 2) + self.mini
+        data = pl.Series(data.squeeze(-1))
+        data = ((data + 1.0) * self.range / 2.0) + self.mini
         data = data.cast(self.dtype)
         if self.learn_rounding and self._rounding_digits is not None:
             data = data.round(self._rounding_digits)
@@ -148,6 +148,8 @@ class CategoricalTokeniser(BaseEncoder):
         Raises:
             UserWarning: If the data is not of type int or object.
         """
+        self.name = name
+        self.verbose = verbose
         self.dtype = data.dtype
         self.encoded, self.mapping = tokenize(data)
 
@@ -156,13 +158,15 @@ class CategoricalTokeniser(BaseEncoder):
         self.size = len(self.mapping)
 
         if verbose:
-            print(
-                f"{self.__class__.__name__}: ({name}) size: {self.size}, categories: {self.mapping}, dtype: {self.dtype}"
-            )
             if self.size > 20:
                 print(
-                    f">>> Warning: CategoricalEncoder has more than 20 categories ({self.size})). <<<"
+                    f">>> Warning: {self} has more than 20 categories ({self.size})). <<<"
                 )
+
+    def __str__(self):
+        if self.verbose:
+            return f"{self.__class__.__name__}: ({self.name}) size: {self.size}, categories: {self.mapping}, dtype: {self.dtype}"
+        return f"{self.__class__.__name__}: ({self.name}) size: {self.size}"
 
     def get_weights(self) -> Tensor:
         """Calculate weights for each category based on their frequency in the data.

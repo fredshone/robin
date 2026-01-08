@@ -1,5 +1,4 @@
 import copy
-import datetime
 from pathlib import Path
 
 import optuna
@@ -29,12 +28,8 @@ def tune_command(
         None
 
     """
-    name = str(
-        config.get("logging", {}).get(
-            "name", datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        )
-    )
-    log_dir = Path(config.get("logging", {}).get("dir", "logs")) / name
+    project = str(config.get("sweep", {}).get("project"))
+    log_dir = Path(config.get("logging", {}).get("dir", "logs")) / project
     tune_dir = log_dir / "tune"
 
     # create directories
@@ -120,7 +115,7 @@ def tune_command(
 
     study = optuna.create_study(
         storage=db_name,
-        study_name=name,
+        study_name=project,
         direction="minimize",
         sampler=optuna.samplers.TPESampler(seed=seed),
         pruner=pruner,

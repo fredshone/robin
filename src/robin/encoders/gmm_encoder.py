@@ -1,3 +1,4 @@
+import warnings
 from typing import Iterable, Optional
 
 import numpy as np
@@ -45,15 +46,19 @@ class GMMEncoder(BaseEncoder):
         self,
         data: pl.Series,
         name: str,
+        max_components: int = 10,
         verbose: bool = False,
         learn_rounding=False,
         enforce_min_max=False,
-        max_components=10,
+        max_iter: int = 100,
         weight_threshold=0.005,
         seed: Optional[int] = None,
     ):
+        self.name = name
+        self.verbose = verbose
         self.learn_rounding = learn_rounding
         self.enforce_min_max = enforce_min_max
+        self.max_iter = max_iter
         self.max_components = max_components
         self.weight_threshold = weight_threshold
         self.seed = seed if seed is not None else 12345
@@ -64,10 +69,8 @@ class GMMEncoder(BaseEncoder):
         self.encoding = "decomposed"
         self.slot_size = 2
 
-        if verbose:
-            print(
-                f"{self.__class__.__name__}: ({name}) clusters: {self.size}/{self.max_components}"
-            )
+    def __str__(self):
+        return f"{self.__class__.__name__}: ({self.name}) {self.size}/{self.max_components} components."
 
     def _fit(self, data: pl.Series):
         """Fit the transformer to the data.
@@ -78,7 +81,7 @@ class GMMEncoder(BaseEncoder):
         """
         self.transformer = BayesianGaussianMixture(
             n_components=self.max_components,
-            max_iter=1000,
+            max_iter=self.max_iter,
             weight_concentration_prior_type="dirichlet_process",
             weight_concentration_prior=None,
             random_state=self.seed,
@@ -91,15 +94,25 @@ class GMMEncoder(BaseEncoder):
         if self.learn_rounding:
             self._rounding_digits = self.get_rounding(data)
 
-        # with warnings.catch_warnings():
-        #     warnings.simplefilter("ignore")
         data = data.to_numpy().reshape(-1, 1)
-        self.transformer.fit(data)  # .reshape(-1, 1)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            self.transformer.fit(data)  # .reshape(-1, 1)
 
-        self.threshold_indices = (
-            self.transformer.weights_ > self.weight_threshold
-        )
-        self.size = sum(self.threshold_indices)
+        self.threshold_mask = self.transformer.weights_ > self.weight_threshold
+        self.size = sum(self.threshold_mask)
+
+    def score(self, data: pl.Series) -> float:
+        """Calculate the Log Likelihood for the fitted transformation.
+        Args:
+            data (pl.Series):
+                Data to calculate the log likelihood for.
+
+        Returns:
+            float: The Log Likelihood value.
+        """
+        data = data.to_numpy().reshape(-1, 1)
+        return self.transformer.score(X=data)
 
     def encode(self, data: pl.Series) -> Tensor:
         """Transform the numerical data.
@@ -115,19 +128,16 @@ class GMMEncoder(BaseEncoder):
 
         # data = data.reshape((len(data), 1))
         means = self.transformer.means_.reshape((1, self.max_components))
-        means = means[:, self.threshold_indices]
+        means = means[:, self.threshold_mask]
         vars = self.transformer.covariances_.reshape((1, self.max_components))
         stds = np.sqrt(vars)
-        stds = stds[:, self.threshold_indices]
+        stds = stds[:, self.threshold_mask]
 
         # Multiply stds by 4 so that a value will be in the range [-1,1] with 99.99% probability
         normalized_values = (data - means) / (4 * stds)
         component_probs = self.transformer.predict_proba(data)
-        component_probs = component_probs[:, self.threshold_indices]
-        # component_probs = (component_probs + 1e-6) / component_probs.sum(
-        #     axis=1, keepdims=True
-        # )
-        component_probs = component_probs / component_probs.sum(
+        component_probs = component_probs[:, self.threshold_mask]
+        component_probs = (component_probs + 1e-6) / component_probs.sum(
             axis=1, keepdims=True
         )
 
@@ -141,6 +151,7 @@ class GMMEncoder(BaseEncoder):
         normalized = normalized[:, 0]
         rows = [normalized, selected_component]
         encoded = np.stack(rows, axis=1)
+        assert encoded.shape[1] == 2
         return Tensor(encoded)
 
     def decode(self, data: Iterable) -> pl.Series:
@@ -152,32 +163,30 @@ class GMMEncoder(BaseEncoder):
         Returns:
             pl.Series.
         """
+        assert data.shape[1] == 2
         data = np.array(data)
 
         means = self.transformer.means_.reshape([-1])
-        print("means shape", means.shape)
         stds = np.sqrt(self.transformer.covariances_).reshape([-1])
-        print("stds shape", stds.shape)
 
-        # first col [:,0] is value, second col [:,1] is component
-        normalized = np.clip(data[:, 0], -1, 1)
-        print("norms", normalized.shape, normalized.min(), normalized.max())
-        selected_component = data[:, 1].round().astype(int)
-        print(
-            "selected_component",
-            selected_component.shape,
-            selected_component.max(),
+        # first col [:,0] is component value, second col [:,1] is component index
+        selected_component = data[:, 1]
+        selected_component = selected_component.round().astype(int)
+        selected_component = selected_component.clip(
+            0, self.threshold_mask.sum() - 1
         )
-        print("threshold_indices", self.threshold_indices.shape)
 
-        std_t = stds[self.threshold_indices][selected_component]
-        mean_t = means[self.threshold_indices][selected_component]
+        normalized = np.clip(data[:, 0], -1, 1)
+
+        std_t = stds[self.threshold_mask]
+        std_t = std_t[selected_component]
+        mean_t = means[self.threshold_mask][selected_component]
         decoded = normalized * 4 * std_t + mean_t
 
         if self.enforce_min_max:
-            data = data.clip(self._min_value, self._max_value)
+            decoded = decoded.clip(self._min_value, self._max_value)
 
         if self.learn_rounding and self._rounding_digits is not None:
-            data = data.round(self._rounding_digits)
+            decoded = decoded.round(self._rounding_digits)
 
         return pl.Series(decoded)

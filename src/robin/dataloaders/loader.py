@@ -43,7 +43,7 @@ class DataModule(LightningDataModule):
         self.mapping = None
 
     def setup(self, stage: Optional[str] = None) -> None:
-        if self.test_split is None:
+        if self.test_split is None or self.test_split == 0.0:
             (self.train_dataset, self.val_dataset) = (
                 torch.utils.data.random_split(
                     self.dataset, [1 - self.val_split, self.val_split]

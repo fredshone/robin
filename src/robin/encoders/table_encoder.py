@@ -33,6 +33,7 @@ class TableEncoder:
         exclude: Optional[list] = None,
         verbose: bool = False,
         enable_decomposed_continuous: bool = False,
+        max_components: Optional[int] = None,
         learn_rounding_scheme: bool = False,
         enforce_min_max_values: bool = False,
     ):
@@ -43,10 +44,15 @@ class TableEncoder:
             include (list, optional): columns to include. Defaults to None.
             exclude (list, optional): columns to exclude. Defaults to None.
             verbose (bool, optional): print the configuration. Defaults to False.
+            enable_decomposed_continuous (bool, optional): enable GMM encoding for continuous columns. Defaults to False.
+            max_components (int, optional): maximum number of GMM components. Defaults to None.
+            learn_rounding_scheme (bool, optional): learn rounding scheme for continuous columns. Defaults to False.
+            enforce_min_max_values (bool, optional): enforce min and max values for continuous columns
         """
 
         self.verbose = verbose
         self.enable_decomposed_continuous = enable_decomposed_continuous
+        self.max_components = max_components
         self.learn_rounding = learn_rounding_scheme
         self.enforce_min_max = enforce_min_max_values
 
@@ -69,6 +75,16 @@ class TableEncoder:
             self.configure_polars(data, verbose=verbose)
         else:
             raise ValueError("Data must be a pandas or polars dataframe")
+        if self.verbose:
+            print(str(self))
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}: ({len(self.encoders)} encoders)"
+
+    def __str__(self):
+        return f"{self.__repr__()}:\n" + "\n".join(
+            [f"\t--> {e}" for e in self.encoders.values()]
+        )
 
     def configure_polars(
         self, data: pl.DataFrame, verbose: bool = False
@@ -101,6 +117,7 @@ class TableEncoder:
                     data[column],
                     column,
                     verbose=verbose,
+                    max_components=self.max_components,
                     learn_rounding=self.learn_rounding,
                     enforce_min_max=self.enforce_min_max,
                 )
@@ -181,9 +198,34 @@ class TableEncoder:
 
         encoded = cat(encoded, dim=-1).float()
         dataset = TableDataset(encoded)
-        if self.verbose:
-            print(f"{self} encoded: {dataset}")
         return dataset  # todo: weights
+
+    def decode(self, data: List[Tensor]) -> pd.DataFrame | pl.DataFrame:
+        """Decode Tensor of tokens back into dataframe.
+
+        Args:
+            data (List[Tensor]): input Tensor of tokens to decode.
+
+        Returns:
+            Union[pd.DataFrame, pl.DataFrame]: decoded dataframe.
+        """
+        assert data.ndim == 2, "Data must be a 2D Tensor"
+        assert data.shape[1] == sum(
+            self.slot_sizes()
+        ), "Data shape does not match encoder configuration"
+
+        decoded = {}
+        for (name, encoder), (i, j) in zip(
+            self.encoders.items(), self.slot_idxs()
+        ):
+            tokens = data[:, i:j]
+            decoded[name] = encoder.decode(tokens)
+        decoded = (
+            pd.DataFrame(decoded)
+            if self.mode == pd.DataFrame
+            else pl.DataFrame(decoded)
+        )
+        return decoded
 
     def encode_series(self, data: pd.Series) -> Tensor:
         """Encode a pandas series into a 1d Tensor.
@@ -244,37 +286,3 @@ class TableEncoder:
             List[List[Optional[float]]]: list of weights of the embeddings.
         """
         return [encoder.get_weights() for encoder in self.encoders.values()]
-
-    def decode(self, data: List[Tensor]) -> Union[pd.DataFrame, pl.DataFrame]:
-        """Decode Tensor of tokens back into dataframe.
-
-        Args:
-            data (List[Tensor]): input Tensor of tokens to decode.
-
-        Returns:
-            Union[pd.DataFrame, pl.DataFrame]: decoded dataframe.
-        """
-        decoded = {}
-        for (name, encoder), (i, j) in zip(
-            self.encoders.items(), self.slot_idxs()
-        ):
-            tokens = data[:, i:j]
-            decoded[name] = encoder.decode(tokens)
-        decoded = (
-            pd.DataFrame(decoded)
-            if self.mode == pd.DataFrame
-            else pl.DataFrame(decoded)
-        )
-        return decoded
-
-    def argmax_decode(
-        self, data: List[Tensor]
-    ) -> Union[pd.DataFrame, pl.DataFrame]:
-        argmaxed = [d.argmax(dim=-1) for d in data]
-        return self.decode(argmaxed)
-
-    def multinomial_decode(
-        self, data: List[Tensor]
-    ) -> Union[pd.DataFrame, pl.DataFrame]:
-        sampled = [d.multinomial(1).squeeze() for d in data]
-        return self.decode(sampled)

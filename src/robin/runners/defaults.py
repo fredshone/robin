@@ -7,3 +7,4 @@ PATIENCE = 2
 DROPOUT = 0.1
 ACTIVATION = True
 NORMALIZE = True
+SAMPLER = "argmax"

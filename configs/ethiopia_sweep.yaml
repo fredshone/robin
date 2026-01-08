@@ -7,6 +7,11 @@ sweep:
     goal: minimize
 
   parameters:
+    encoder:
+      parameters:
+        enable_decomposed_continuous:
+          values: [True, False]
+
     model:
       parameters:
         latent_size:
@@ -31,7 +36,9 @@ sweep:
         hidden_size:
           min: 8
           max: 512
-          
+        sampler:
+          values: [argmax, multinomial]
+
         controls_encoder:
           parameters:
             depth:
@@ -50,11 +57,7 @@ sweep:
               min: 1
               max: 4
 
-
-    generate:
-      parameters:
-        sample:
-          values: [argmax, multinomial]
+      
 
 seed: 12345
 
@@ -84,6 +87,12 @@ data:
     denomination,
   ]
 
+encoder:
+  enable_decomposed_continuous: False
+  max_components: 10
+  learn_rounding_scheme: True
+  enforce_min_max_values: True
+
 datamodule:
   val_split: 0.1
   test_split: 0.0
@@ -108,13 +117,11 @@ model:
   normalize: True
   controls_encoder:
     depth: 3
-    hidden_size: 256
   encoder:
     depth: 2
-    hidden_size: 256
   decoder:
     depth: 2
-    hidden_size: 256
+  sampler: argmax
 
 early_stopping:
   patience: 20
@@ -127,7 +134,6 @@ trainer:
 
 generate:
   target_path: None
-  sample: argmax
 
 evaluate:
   orders: [1,2,3]
