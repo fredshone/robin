@@ -28,7 +28,7 @@ data:
   ]
 
 encoder:
-  enable_decomposed_continuous: False
+  enable_decomposed_continuous: True
   max_components: 10
   learn_rounding_scheme: True
   enforce_min_max_values: True
@@ -49,27 +49,27 @@ gen_dataloader:
   pin_memory: False
 
 model:
-  latent_size: 22
-  beta: 0.1
-  lr: 0.001
+  latent_size: 10
+  beta: 0.005
+  lr: 0.0001
   dropout: 0.3
-  activation: True
-  normalize: True
-  hidden_size: 256
+  skips: False
+  normalize: False
+  hidden_size: 512
   controls_encoder:
-    depth: 3
+    depth: 2
   encoder:
     depth: 2
   decoder:
     depth: 2
-  sampler: sample
+  sampler: multinomial
 
 early_stopping:
   patience: 10
 
 trainer:
-  min_epochs: 3
-  max_epochs: 3
+  min_epochs: 10
+  max_epochs: 100
   check_val_every_n_epoch: 1
   log_every_n_steps: 10
 

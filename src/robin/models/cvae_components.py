@@ -11,27 +11,28 @@ class ControlsEncoderBlock(nn.Module):
         encoder_sizes: list,
         depth: int,
         hidden_size: int,
-        activation: bool = True,
+        skips: bool = True,
         normalize: bool = False,
         dropout: float = 0.0,
     ):
         super().__init__()
+        self.skips = skips
         self.embed = Embedder(
             encoder_types, slot_idxs, encoder_sizes, hidden_size
         )
         self.ff = FFBlock(
-            hidden_size,
-            hidden_size,
-            depth,
-            hidden_size,
-            activation=activation,
-            normalize=normalize,
-            dropout=dropout,
+            hidden_size, hidden_size, depth, hidden_size, dropout=dropout
         )
+        self.normalize = normalize
+        self.norm = nn.BatchNorm1d(hidden_size)
 
     def forward(self, y: Tensor) -> Tensor:
-        h = self.embed(y)
-        h = self.ff(h)
+        e = self.embed(y)
+        h = self.ff(e)
+        if self.skips:
+            h = e + h
+        if self.normalize:
+            h = self.norm(h)
         return h
 
 
@@ -44,31 +45,31 @@ class CVAEEncoderBlock(nn.Module):
         depth: int,
         hidden_size: int,
         latent_size: int,
-        activation: bool = True,
+        skips: bool = True,
         normalize: bool = False,
         dropout: float = 0.0,
     ):
         super().__init__()
+        self.skips = skips
+        self.normalize = normalize
         self.embed = Embedder(
             encoder_types, slot_idxs, encoder_sizes, hidden_size
         )
         self.ff = FFBlock(
-            hidden_size,
-            hidden_size,
-            depth,
-            hidden_size,
-            activation=activation,
-            normalize=normalize,
-            dropout=dropout,
+            hidden_size, hidden_size, depth, hidden_size, dropout=dropout
         )
-        self.batch_norm = nn.BatchNorm1d(hidden_size)
+        self.norm = nn.BatchNorm1d(hidden_size)
         self.fc_mu = nn.Linear(hidden_size, latent_size)
         self.fc_var = nn.Linear(hidden_size, latent_size)
 
     def forward(self, hidden_y: Tensor, x: Tensor) -> Tuple[Tensor, Tensor]:
-        h = self.embed(x)
-        h = h + hidden_y
-        h = self.ff(h)
+        e = self.embed(x)
+        e = e + hidden_y
+        h = self.ff(e)
+        if self.normalize:
+            h = self.norm(h)
+        if self.skips:
+            h = e + h
         mu = self.fc_mu(h)
         var = self.fc_var(h)
         return mu, var
@@ -82,20 +83,18 @@ class CVAEDecoderBlock(nn.Module):
         depth,
         hidden_size,
         latent_size,
-        activation: bool = True,
+        skips: bool = True,
         normalize: bool = False,
         dropout: float = 0.0,
     ):
         super().__init__()
-        self.ff = FFBlock(
-            latent_size,
-            hidden_size,
-            depth,
-            hidden_size,
-            activation=activation,
-            normalize=normalize,
-            dropout=dropout,
+        self.skips = skips
+        self.normalize = normalize
+        self.resize = nn.Linear(latent_size, hidden_size)
+        self.zff = FFBlock(
+            latent_size, hidden_size, depth, hidden_size, dropout=dropout
         )
+        self.norm = nn.BatchNorm1d(hidden_size)
         embeds = []
         for type, size in zip(encoder_types, encoder_sizes):
             if type == "continuous":
@@ -116,7 +115,12 @@ class CVAEDecoderBlock(nn.Module):
         self.embeds = nn.ModuleList(embeds)
 
     def forward(self, hidden_y: Tensor, z: Tensor) -> Tensor:
-        h = self.ff(z)
+        h = self.zff(z)
+        if self.normalize:
+            h = self.norm(h)
+        if self.skips:
+            z = self.resize(z)
+            h = h + z
         h = h + hidden_y
         xs = [embed(h).squeeze(1) for embed in self.embeds]
         return xs
@@ -175,25 +179,24 @@ class FFBlock(nn.Module):
         hidden_size: int,
         depth: int,
         output_size: int,
-        activation: bool = True,
-        normalize: bool = False,
         dropout: float = 0.0,
     ):
         super().__init__()
         if depth < 0:
-            raise ValueError("hidden_n must be non-negative")
-        if depth == 0 and input_size == output_size:
-            block = [Noop()]
-        elif depth < 2:
-            block = [nn.Linear(input_size, output_size)]
+            raise ValueError("depth must be non-negative")
+        elif depth == 0:
+            if input_size == output_size:
+                block = [Noop()]
+            else:
+                raise ValueError(
+                    "input_size must equal output_size when depth is 0"
+                )
         else:
             block = [nn.Linear(input_size, hidden_size)]
             for _ in range(depth - 1):
-                if activation:
-                    block.append(nn.ReLU())
-            block.extend([nn.Linear(hidden_size, output_size)])
-        if normalize:
-            block.append(nn.LayerNorm(hidden_size))
+                block.extend(
+                    [nn.LeakyReLU(), nn.Linear(hidden_size, output_size)]
+                )
         if dropout > 0:
             block.append(nn.Dropout(dropout))
         self.block = nn.Sequential(*block)

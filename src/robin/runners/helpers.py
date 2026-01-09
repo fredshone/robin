@@ -50,7 +50,8 @@ def build_model(
     verbose: bool = False,
 ) -> LightningModule:
     model_params = config.get("model", {})
-    activation = model_params.get("activation", defaults.ACTIVATION)
+    hidden_size = model_params.get("hidden_size", defaults.WIDTH)
+    skips = model_params.get("skips", defaults.SKIPS)
     normalize = model_params.get("normalize", defaults.NORMALIZE)
     dropout = model_params.get("dropout", defaults.DROPOUT)
 
@@ -62,8 +63,8 @@ def build_model(
         depth=model_params.get("controls_encoder", {}).get(
             "depth", defaults.DEPTH
         ),
-        hidden_size=model_params.get("hidden_size", defaults.WIDTH),
-        activation=activation,
+        hidden_size=hidden_size,
+        skips=skips,
         normalize=normalize,
         dropout=dropout,
     )
@@ -74,9 +75,9 @@ def build_model(
         slot_idxs=x_encoder.slot_idxs(),
         encoder_sizes=x_encoder.sizes(),
         depth=model_params.get("encoder", {}).get("depth", defaults.DEPTH),
-        hidden_size=model_params.get("hidden_size", defaults.WIDTH),
+        hidden_size=hidden_size,
         latent_size=model_params.get("latent_size", defaults.LATENT_SIZE),
-        activation=activation,
+        skips=skips,
         normalize=normalize,
         dropout=dropout,
     )
@@ -84,9 +85,9 @@ def build_model(
         encoder_types=x_encoder.types(),
         encoder_sizes=x_encoder.sizes(),
         depth=model_params.get("decoder", {}).get("depth", defaults.DEPTH),
-        hidden_size=model_params.get("hidden_size", defaults.WIDTH),
+        hidden_size=hidden_size,
         latent_size=model_params.get("latent_size", defaults.LATENT_SIZE),
-        activation=activation,
+        skips=skips,
         normalize=normalize,
         dropout=dropout,
     )

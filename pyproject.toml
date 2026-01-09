@@ -21,6 +21,7 @@ dependencies = [
   "matplotlib",
   "numpy",
   "pandas",
+  "torch",
   "pytorch-lightning",
   "jupyter",
   "jupyter_contrib_nbextensions",
