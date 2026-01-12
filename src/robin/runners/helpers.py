@@ -50,7 +50,13 @@ def build_model(
     verbose: bool = False,
 ) -> LightningModule:
     model_params = config.get("model", {})
-    hidden_size = model_params.get("hidden_size", defaults.WIDTH)
+
+    # get latent size from config
+    latent_size = get_latent_size(config)
+
+    # get hidden size from config
+    hidden_size = get_hidden_size(config)
+
     skips = model_params.get("skips", defaults.SKIPS)
     normalize = model_params.get("normalize", defaults.NORMALIZE)
     dropout = model_params.get("dropout", defaults.DROPOUT)
@@ -76,17 +82,18 @@ def build_model(
         encoder_sizes=x_encoder.sizes(),
         depth=model_params.get("encoder", {}).get("depth", defaults.DEPTH),
         hidden_size=hidden_size,
-        latent_size=model_params.get("latent_size", defaults.LATENT_SIZE),
+        latent_size=latent_size,
         skips=skips,
         normalize=normalize,
         dropout=dropout,
     )
+
     decoder = CVAEDecoderBlock(
         encoder_types=x_encoder.types(),
         encoder_sizes=x_encoder.sizes(),
         depth=model_params.get("decoder", {}).get("depth", defaults.DEPTH),
         hidden_size=hidden_size,
-        latent_size=model_params.get("latent_size", defaults.LATENT_SIZE),
+        latent_size=latent_size,
         skips=skips,
         normalize=normalize,
         dropout=dropout,
@@ -105,6 +112,8 @@ def build_model(
         sampler=model_params.get("sampler", defaults.SAMPLER),
         verbose=verbose,
     )
+    if verbose:
+        print(model)
     if ckpt_path:
         model = model.load_from_checkpoint(ckpt_path)
     return model
@@ -148,11 +157,27 @@ def run_tests(trainer: Trainer, ckpt_path: Optional[str] = None) -> dict:
     return losses
 
 
+def get_latent_size(config: dict) -> int:
+    # get latent size from config
+    model_params = config.get("model", {})
+    latent_size = model_params.get("latent_size_2")
+    if latent_size is not None:
+        return 2**latent_size
+    return model_params.get("latent_size", defaults.LATENT_SIZE)
+
+
+def get_hidden_size(config: dict) -> int:
+    # get hidden size from config
+    model_params = config.get("model", {})
+    hidden_size = model_params.get("hidden_size_2")
+    if hidden_size is not None:
+        return 2**hidden_size
+    return model_params.get("hidden_size", defaults.HIDDEN_SIZE)
+
+
 def build_gen_loader(config: dict, y_dataset: Tensor) -> DataLoader:
     n = len(y_dataset)
-    latent_size = config.get("model", {}).get(
-        "latent_size", defaults.LATENT_SIZE
-    )
+    latent_size = get_latent_size(config)
     z_loader = ZDataset(n, latent_size)
     yz_loader = YZDataset(y_dataset, z_loader)
     return DataLoader(yz_loader, **config.get("gen_dataloader", {}))

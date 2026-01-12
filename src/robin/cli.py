@@ -1,10 +1,10 @@
 from typing import Optional
 
 import click
-import wandb
 import yaml
 
 from robin.runners.run import print_summary, run_command
+from robin.runners.sweep import sweep_command
 from robin.runners.tune import tune_command
 
 
@@ -31,6 +31,14 @@ def run(config_path: click.Path, test: bool, verbose: bool, offline: bool):
 @cli.command("sweep")
 @click.argument("config_path", type=click.Path(exists=True))
 @click.option(
+    "--id",
+    "-i",
+    type=str,
+    required=False,
+    default=None,
+    help="Optional existing sweep ID to use.",
+)
+@click.option(
     "--count",
     "-c",
     type=int,
@@ -39,21 +47,19 @@ def run(config_path: click.Path, test: bool, verbose: bool, offline: bool):
 )
 @click.option("--test", "-t", is_flag=True)
 @click.option("--verbose", "-v", is_flag=True)
-def sweep(config_path: click.Path, count: int, test: bool, verbose: bool):
+def sweep(
+    config_path: click.Path,
+    id: Optional[str],
+    count: int,
+    test: bool,
+    verbose: bool,
+):
     """
     Start a W&B sweep using a sweep config.
     """
     with open(config_path, "r") as file:
         config = yaml.safe_load(file)
-    sweep_cfg = config.pop("sweep")
-    project = sweep_cfg.get("project")
-
-    sweep_id = wandb.sweep(sweep_cfg)
-
-    def sweep_run():
-        run_command(config=config, verbose=verbose, test=test)
-
-    wandb.agent(sweep_id, function=sweep_run, count=count, project=project)
+    sweep_command(config, id=id, count=count, test=test, verbose=verbose)
 
 
 @cli.command(name="tune")
