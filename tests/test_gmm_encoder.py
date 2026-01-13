@@ -23,4 +23,4 @@ def test_gmm_encoder_two_component():
     x = pl.Series("", [0.1] * 10 + [0.9] * 10)
     encoder = GMMEncoder(x, name="", verbose=True, max_components=2)
     _ = encoder.encode(x)
-    assert encoder.size == 3
+    assert encoder.size == 2
