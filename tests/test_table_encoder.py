@@ -16,7 +16,7 @@ def test_encode_decode_table():
         ),
     )
     encoder = TableEncoder(data=original_table)
-    encoded = encoder.encode(data=original_table)
+    encoded = encoder.fit_and_encode(data=original_table)
     decoded = encoder.decode(encoded.data)
 
     assert_frame_equal(decoded, original_table)

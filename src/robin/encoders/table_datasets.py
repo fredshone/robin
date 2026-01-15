@@ -1,18 +1,14 @@
 import torch
+from torch import Tensor
 from torch.utils.data import Dataset
 
 
 class XDataset(Dataset):
-    def __init__(self, data: torch.Tensor):
-        """Dataset for the input features.
-
-        Args:
-            data (torch.Tensor): The input features.
-        """
+    def __init__(self, data: Tensor):
         self.data = data
 
     def __repr__(self):
-        return f"{super().__repr__()}: {self.data.shape}"
+        return f"Dataset: {self.data.shape}"
 
     def __getitem__(self, index):
         return self.data[index]

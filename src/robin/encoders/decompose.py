@@ -4,9 +4,196 @@ from typing import Iterable, Optional
 import numpy as np
 import polars as pl
 from sklearn.mixture import BayesianGaussianMixture
+from sklearn.preprocessing import (
+    PowerTransformer,
+    QuantileTransformer,
+    StandardScaler,
+)
 from torch import Tensor
 
 from robin.encoders.base import BaseEncoder
+from robin.encoders.utils import inverse_token_frequency
+
+
+class LogTransform:
+    """z = log(x + c); inverse: x = exp(z) - c"""
+
+    def __init__(self, offset=0.0):
+        self.c = float(offset)
+
+    def fit(self, X):
+        if np.min(X) + self.c <= 0:
+            raise ValueError("log requires X + offset > 0 for all entries.")
+        return self
+
+    def encode(self, X):
+        return np.log(X + self.c)
+
+    def decode(self, Z):
+        return np.exp(Z) - self.c
+
+    def log_abs_det_jacobian(self, X):
+        return -np.log(X + self.c).sum(axis=1)
+
+
+class YeoJohnsonTransform:
+    """Uses sklearn PowerTransformer (yeo-johnson)."""
+
+    def __init__(self):
+        self.pt = PowerTransformer(
+            method="yeo-johnson", standardize=False
+        )  # keep scaling separate if desired
+
+    def fit(self, X):
+        self.pt.fit(X)
+        return self
+
+    def encode(self, X):
+        return self.pt.transform(X)
+
+    def decode(self, Z):
+        return self.pt.inverse_transform(Z)
+
+    def log_abs_det_jacobian(self, X):
+        eps = 1e-6
+        n, d = X.shape
+        log_det = np.zeros(n)
+        for j in range(d):
+            x = X[:, [j]]
+            z = self.encode(x)  # shape (n,1)
+            # central difference on f w.r.t. x_j
+            x_plus = x + eps
+            x_minus = x - eps
+            z_plus = self.encode(x_plus)
+            z_minus = self.encode(x_minus)
+            dzdx = (z_plus - z_minus) / (2 * eps)
+            log_det += np.log(np.abs(dzdx[:, 0]) + 1e-15)
+        return log_det
+
+
+class QuantileNormalTransform:
+    """Approximately invertible Gaussianizer via quantile mapping to N(0,1)."""
+
+    def __init__(self, n_quantiles=1000, subsample=10_000, random_state=0):
+        self.qt = QuantileTransformer(
+            n_quantiles=n_quantiles,
+            output_distribution="normal",
+            subsample=subsample,
+            random_state=random_state,
+        )
+
+    def fit(self, X):
+        self.qt.fit(X)
+        return self
+
+    def encode(self, X):
+        return self.qt.transform(X)
+
+    def decode(self, Z):
+        return self.qt.inverse_transform(Z)
+
+    def log_abs_det_jacobian(self, X):
+        raise NotImplementedError(
+            "QuantileNormalTransform does not implement log|J|."
+        )
+
+
+class Standardize:
+    def __init__(self):
+        self.ss = StandardScaler(with_mean=True, with_std=True)
+
+    def fit(self, X):
+        self.ss.fit(X)
+        return self
+
+    def encode(self, X):
+        return self.ss.transform(X)
+
+    def decode(self, Z):
+        return self.ss.inverse_transform(Z)
+
+    def log_abs_det_jacobian(self, X):
+        # Linear transform z = (x-mu)/sigma => |det J| = prod(1/sigma_j)
+        # log|det J| is constant per row
+        s = self.ss.scale_
+        return np.full(X.shape[0], -np.sum(np.log(np.abs(s) + 1e-15)))
+
+
+class MetaDeecomposer(BaseEncoder):
+    tranformers = [
+        None,
+        Standardize,
+        LogTransform,
+        YeoJohnsonTransform,
+        QuantileNormalTransform,
+    ]
+
+    def __init__(
+        self,
+        data: pl.Series,
+        name: str,
+        max_components: int = 10,
+        verbose: bool = False,
+        learn_rounding=False,
+        enforce_min_max=False,
+        use_token_weights: bool = False,
+        max_iter: int = 100,
+        weight_threshold=0.005,
+        seed: Optional[int] = None,
+        **kwargs,
+    ):
+        self.name = name
+        self.verbose = verbose
+        self._learn_rounding = learn_rounding
+        self.enforce_min_max = enforce_min_max
+        self.use_token_weights = use_token_weights
+        self.max_iter = max_iter
+        self.max_components = max_components
+        self.weight_threshold = weight_threshold
+        self.seed = seed if seed is not None else 12345
+        self.size = None
+        self.encoding = "decomposed"
+        self.slot_size = 2
+
+    def fit_and_encode(self, data: pl.Series) -> Tensor:
+        best_likelihood = -np.inf
+        best_encoded = None
+
+        for transformer in self.transformers:
+            self.transformer = transformer()
+            try:
+                self.transformer.fit(data.to_numpy().reshape(-1, 1))
+                transformed_data = self.transformer.encode(
+                    data.to_numpy().reshape(-1, 1)
+                )
+                transformed_series = pl.Series(transformed_data.flatten())
+                if self.verbose:
+                    print(
+                        f">>> MetaDecomposer: Using {transformer.__name__} for {self.name} <<<"
+                    )
+                break
+            except Exception as e:
+                if self.verbose:
+                    print(
+                        f">>> MetaDecomposer: Transformer {transformer} failed with error: {e} <<<"
+                    )
+
+            gmm_encoder = GMMEncoder()
+            encoded = gmm_encoder.fit_and_encode(data)
+            score = gmm_encoder.score(data)
+            # todo
+
+        if self.use_token_weights:
+            self._token_weights = inverse_token_frequency(encoded[:, 1].long())
+            if self.verbose:
+                print(
+                    f">>> GMMEncoder: Using token weights for {self.name} with shape {self._token_weights.shape} <<<"
+                )
+
+        self.dtype = data.dtype
+        self.size = sum(self.threshold_mask)
+
+        return encoded
 
 
 class GMMEncoder(BaseEncoder):
@@ -50,24 +237,40 @@ class GMMEncoder(BaseEncoder):
         verbose: bool = False,
         learn_rounding=False,
         enforce_min_max=False,
+        use_token_weights: bool = False,
         max_iter: int = 100,
         weight_threshold=0.005,
         seed: Optional[int] = None,
+        **kwargs,
     ):
         self.name = name
         self.verbose = verbose
-        self.learn_rounding = learn_rounding
+        self._learn_rounding = learn_rounding
         self.enforce_min_max = enforce_min_max
+        self.use_token_weights = use_token_weights
         self.max_iter = max_iter
         self.max_components = max_components
         self.weight_threshold = weight_threshold
         self.seed = seed if seed is not None else 12345
         self.size = None
-        self._fit(data)
 
-        self.dtype = data.dtype
         self.encoding = "decomposed"
         self.slot_size = 2
+
+    def fit_and_encode(self, data: pl.Series) -> Tensor:
+        self._fit(data)
+        encoded = self.encode(data)
+        if self.use_token_weights:
+            self._token_weights = inverse_token_frequency(encoded[:, 1].long())
+            if self.verbose:
+                print(
+                    f">>> GMMEncoder: Using token weights for {self.name} with shape {self._token_weights.shape} <<<"
+                )
+
+        self.dtype = data.dtype
+        self.size = sum(self.threshold_mask)
+
+        return encoded
 
     def __str__(self):
         return f"{self.__class__.__name__}: ({self.name}) {self.size}/{self.max_components} components."
@@ -91,16 +294,14 @@ class GMMEncoder(BaseEncoder):
             self._min_value = data.min()
             self._max_value = data.max()
 
-        if self.learn_rounding:
+        if self._learn_rounding:
             self._rounding_digits = self.get_rounding(data)
 
-        data = data.to_numpy().reshape(-1, 1)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            self.transformer.fit(data)  # .reshape(-1, 1)
+            self.transformer.fit(data.to_numpy().reshape(-1, 1))
 
         self.threshold_mask = self.transformer.weights_ > self.weight_threshold
-        self.size = sum(self.threshold_mask)
 
     def score(self, data: pl.Series) -> float:
         """Calculate the Log Likelihood for the fitted transformation.
@@ -151,8 +352,9 @@ class GMMEncoder(BaseEncoder):
         normalized = normalized[:, 0]
         rows = [normalized, selected_component]
         encoded = np.stack(rows, axis=1)
+        encoded = Tensor(encoded)
         assert encoded.shape[1] == 2
-        return Tensor(encoded)
+        return encoded
 
     def decode(self, data: Iterable) -> pl.Series:
         """Convert data back into the original format.
@@ -186,7 +388,7 @@ class GMMEncoder(BaseEncoder):
         if self.enforce_min_max:
             decoded = decoded.clip(self._min_value, self._max_value)
 
-        if self.learn_rounding and self._rounding_digits is not None:
+        if self._learn_rounding and self._rounding_digits is not None:
             decoded = decoded.round(self._rounding_digits)
 
         return pl.Series(decoded)

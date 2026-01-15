@@ -75,7 +75,7 @@ torch = [
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-rav --strict-markers -n2 --nbmake --nbmake-kernel=robin --cov --cov-report=xml --cov-config=pyproject.toml -m 'not high_mem' -p no:memray"
+addopts = "-rav --strict-markers -n1 --nbmake --nbmake-kernel=robin --cov --cov-report=xml --cov-config=pyproject.toml -m 'not high_mem' -p no:memray"
 testpaths = ["tests", "examples", "integration_tests"]
 # to mark a test, decorate it with `@pytest.mark.[marker-name]`
 markers = ["high_mem", "limit_memory"]

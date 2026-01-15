@@ -103,7 +103,7 @@ def build_model(
         embedding_names=x_encoder.names(),
         embedding_types=x_encoder.types(),
         slot_idxs=x_encoder.slot_idxs(),
-        embedding_weights=x_encoder.weights(),
+        token_weights=x_encoder.token_weights(),
         labels_encoder_block=labels_encoder_block,
         encoder_block=encoder,
         decoder_block=decoder,

@@ -28,10 +28,11 @@ data:
   ]
 
 encoder:
-  enable_decomposed_continuous: False
+  continuous_encoding: minmax
   max_components: 12
   learn_rounding_scheme: False
   enforce_min_max_values: True
+  use_token_weights: True
 
 datamodule:
   val_split: 0.1

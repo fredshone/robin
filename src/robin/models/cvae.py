@@ -16,7 +16,7 @@ class CVAE(LightningModule):
         decoder_block: nn.Module,
         beta: float,
         lr: float,
-        embedding_weights: Optional[list] = None,
+        token_weights: Optional[dict] = None,
         sampler: Optional[str] = None,
         verbose: bool = False,
     ):
@@ -30,10 +30,9 @@ class CVAE(LightningModule):
         self.embedding_names = embedding_names
         self.embedding_types = embedding_types
         self.slot_idxs = slot_idxs
-        if embedding_weights:
-            self.embedding_weights = embedding_weights
-        else:
-            self.embedding_weights = [None] * len(embedding_names)
+
+        self.token_weights = token_weights or [None] * len(embedding_names)
+
         self.sampler = sampler
 
         self.labels_encoder_block = labels_encoder_block
@@ -47,13 +46,13 @@ class CVAE(LightningModule):
             ignore=["labels_encoder_block", "encoder_block", "decoder_block"]
         )
         criterion = []
-        for etype, weights in zip(self.embedding_types, self.embedding_weights):
+        for etype, weights in zip(self.embedding_types, self.token_weights):
             if etype == "continuous":
                 criterion.append(nn.MSELoss())
             elif etype == "categorical":
                 criterion.append(nn.NLLLoss(weight=weights))
             elif etype == "decomposed":
-                criterion.append(DecomposedLoss())
+                criterion.append(DecomposedLoss(weights=weights))
             else:
                 raise ValueError(f"Unknown embedding type: {etype}")
 
@@ -223,11 +222,11 @@ class CVAE(LightningModule):
 
 
 class DecomposedLoss(nn.Module):
-    # todo: replace mse with gaussian negative log likelihood
-    def __init__(self):
+    # todo:option to replace mse with gaussian negative log likelihood
+    def __init__(self, weights: Optional[Tensor] = None):
         super().__init__()
         self.mse_loss = nn.MSELoss()
-        self.nll_loss = nn.NLLLoss()
+        self.nll_loss = nn.NLLLoss(weight=weights)
 
     def forward(self, log_probs: List[Tensor], target: Tensor) -> Tensor:
         continuous_target = target[:, 0]

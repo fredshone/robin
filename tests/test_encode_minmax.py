@@ -8,6 +8,7 @@ from robin.encoders.base import MinMaxEncoder
 def test_encode_integer_column():
     data = pl.Series(name="integer", values=[10, 20, 30], dtype=pl.Int64)
     encoder = MinMaxEncoder(data=data)
+    encoder.fit_and_encode(data=data)
 
     assert encoder.dtype == pl.Int64
     assert encoder.encoding == "continuous"
@@ -21,6 +22,8 @@ def test_encode_integer_column():
 def test_encode_float_column():
     data = pl.Series(name="float", values=[1.5, 2.5, 3.5], dtype=pl.Float64)
     encoder = MinMaxEncoder(data=data)
+    encoder.fit_and_encode(data=data)
+
     assert encoder.dtype == pl.Float64
     assert encoder.encoding == "continuous"
     assert encoder.size == 1
@@ -33,7 +36,7 @@ def test_encode_float_column():
 def test_encode_integer_column_with_precision():
     data = pl.Series(name="integer", values=[10, 20, 30], dtype=pl.Int64)
     encoder = MinMaxEncoder(data=data, learn_rounding=True)
-    encoded = encoder.encode(data)
+    encoded = encoder.fit_and_encode(data)
     decoded = encoder.decode(encoded)
     assert_series_equal(data, decoded, check_names=False)
 
@@ -41,7 +44,7 @@ def test_encode_integer_column_with_precision():
 def test_encode_float_column_with_precision():
     data = pl.Series(name="float", values=[1.5, 2.5, 3.5], dtype=pl.Float64)
     encoder = MinMaxEncoder(data=data, learn_rounding=True)
-    encoded = encoder.encode(data)
+    encoded = encoder.fit_and_encode(data)
     decoded = encoder.decode(encoded)
     assert [str(decoded[i]) for i in range(len(decoded))] == [
         "1.5",

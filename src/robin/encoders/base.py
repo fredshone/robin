@@ -4,7 +4,7 @@ from typing import Iterable, Optional
 import polars as pl
 from torch import Tensor
 
-from robin.encoders.utils import tokenize
+from robin.encoders.utils import inverse_token_frequency, tokenize
 
 MAX_DECIMALS = sys.float_info.dig
 
@@ -13,9 +13,10 @@ class BaseEncoder:
     dtype = None
     encoding = None
     size = None
-    activation = None
+    _rounding_digits = None
+    _token_weights = None
 
-    def __init__(self, data: Iterable, name: Optional[str] = None):
+    def __init__(self, name: Optional[str] = None) -> None:
         raise NotImplementedError(
             "BaseEncoder is an abstract class. Please use a concrete encoder."
         )
@@ -37,13 +38,37 @@ class BaseEncoder:
 
         return data
 
-    def get_weights(self) -> Optional[Tensor]:
-        return None
+    def fit_and_encode(self, data: Iterable) -> Tensor:
+        """Fit the encoder to the data.
+
+        Args:
+            data (Iterable): input data to fit to.
+
+        Returns:
+            Tensor: token weights.
+        """
+        raise NotImplementedError("Fit method not implemented.")
 
     def encode(self, data: Iterable) -> Tensor:
+        """Encode the data. Returns encoded data and weights.
+
+        Args:
+            data (Iterable): input data to be encoded.
+
+        Returns:
+            tuple[Tensor, Tensor]: encoded data, token_weights.
+        """
         raise NotImplementedError("Encode method not implemented.")
 
     def decode(self, data: Iterable) -> pl.Series:
+        """Decode the data.
+
+        Args:
+            data (Iterable): input data to be decoded.
+
+        Returns:
+            pl.Series: decoded data.
+        """
         raise NotImplementedError("Decode method not implemented.")
 
     def get_rounding(self, data: pl.Series) -> Optional[int]:
@@ -57,10 +82,13 @@ class BaseEncoder:
             int or None:
                 Number of digits to round to.
         """
-        name = data.name if data.name is not None else "unknown"
-        roundable_data = data.filter(data.is_finite())
 
+        roundable_data = data.filter(data.is_finite())
         if len(roundable_data) == 0:
+            name = data.name if data.name is not None else "unknown"
+            print(
+                f"No finite data found for column '{data.name}'. Cannot learn rounding scheme."
+            )
             return None
 
         # Try to round to fewer digits
@@ -73,19 +101,21 @@ class BaseEncoder:
                     return decimal
 
         # Can't round, not equal after MAX_DECIMALS digits of precision
+        name = data.name if data.name is not None else "unknown"
         print(
             f"No rounding scheme detected for column '{name}'. Data will not be rounded."
         )
-        return None
+        return self._token_weights
 
 
 class MinMaxEncoder(BaseEncoder):
+
     def __init__(
         self,
-        data: Iterable,
         name: Optional[str] = None,
         verbose: bool = False,
         learn_rounding: bool = False,
+        **kwargs,
     ):
         """ContinuousEncoder is used to encode continuous data to a range between -1 and 1.
 
@@ -96,13 +126,21 @@ class MinMaxEncoder(BaseEncoder):
         Raises:
             UserWarning: If the data is not of type int or float.
         """
+
+        self.name = name
+        self.verbose = verbose
+        self._learn_rounding = learn_rounding
+        self.encoding = "continuous"
+        self.slot_size = 1
+        self.size = 1
+
+    def fit_and_encode(self, data: Iterable) -> Tensor:
+
         if not data.dtype.is_numeric():
             raise UserWarning(
                 "ContinuousEncoder only supports numeric data types."
             )
-        self.name = name
-        self.verbose = verbose
-        self.learn_rounding = learn_rounding
+
         self.mini = data.min()
         self.maxi = data.max()
         self.range = self.maxi - self.mini
@@ -112,12 +150,10 @@ class MinMaxEncoder(BaseEncoder):
             raise UserWarning("Data has no range. Cannot encode.")
         self.dtype = data.dtype
 
-        if self.learn_rounding:
+        if self._learn_rounding:
             self._rounding_digits = self.get_rounding(data)
 
-        self.encoding = "continuous"
-        self.slot_size = 1
-        self.size = 1
+        return self.encode(data)
 
     def __str__(self):
         return f"{self.__class__.__name__}: ({self.name}) min: {self.mini}, max: {self.maxi}, range: {self.range}, dtype: {self.dtype}"
@@ -130,14 +166,68 @@ class MinMaxEncoder(BaseEncoder):
         data = pl.Series(data.squeeze(-1))
         data = ((data + 1.0) * self.range / 2.0) + self.mini
         data = data.cast(self.dtype)
-        if self.learn_rounding and self._rounding_digits is not None:
+        if self._learn_rounding and self._rounding_digits is not None:
+            data = data.round(self._rounding_digits)
+        return data
+
+
+class StandardScalerEncoder:
+
+    def __init__(
+        self,
+        data: Iterable,
+        name: Optional[str] = None,
+        verbose: bool = False,
+        learn_rounding: bool = False,
+        **kwargs,
+    ):
+        if not data.dtype.is_numeric():
+            raise UserWarning(
+                "StandardScalerEncoder only supports numeric data types."
+            )
+        self.name = name
+        self.verbose = verbose
+        self._learn_rounding = learn_rounding
+        self.encoding = "continuous"
+        self.slot_size = 1
+        self.size = 1
+
+    def fit_and_encode(self, data: Iterable) -> Tensor:
+
+        self.mean = data.mean()
+        self.std = data.std()
+        if self.std == 0:
+            raise UserWarning("Data has no variance. Cannot encode.")
+        self.dtype = data.dtype
+
+        if self._learn_rounding:
+            self._rounding_digits = self.get_rounding(data)
+
+        return self.encode(data)
+
+    def __str__(self):
+        return f"{self.__class__.__name__}: ({self.name}) mean: {self.mean}, std: {self.std}, dtype: {self.dtype}"
+
+    def encode(self, data: Iterable) -> Tensor:
+        data = Tensor(data).unsqueeze(-1)
+        return 0.25 * (data - self.mean) / self.std
+
+    def decode(self, data: Iterable) -> pl.Series:
+        data = pl.Series(data.squeeze(-1))
+        data = (data * self.std) * 4 + self.mean
+        data = data.cast(self.dtype)
+        if self._learn_rounding and self._rounding_digits is not None:
             data = data.round(self._rounding_digits)
         return data
 
 
 class CategoricalTokeniser(BaseEncoder):
     def __init__(
-        self, data: Iterable, name: Optional[str] = None, verbose: bool = False
+        self,
+        name: Optional[str] = None,
+        verbose: bool = False,
+        use_token_weights: bool = False,
+        **kwargs,
     ):
         """CategoricalEncoder is used to encode categorical data as integers from 0 to N.
         Where N is the number of unique categories.
@@ -145,40 +235,40 @@ class CategoricalTokeniser(BaseEncoder):
             data (Iterable): input data to be encoded
             name (str, optional): name of the encoder. Defaults to None.
             verbose (bool, optional): print the encoder configuration. Defaults to False.
+            use_token_weights (bool, optional): whether to use token weights based on inverse token frequency. Defaults to False.
         Raises:
             UserWarning: If the data is not of type int or object.
         """
         self.name = name
         self.verbose = verbose
-        self.dtype = data.dtype
-        self.encoded, self.mapping = tokenize(data)
-
         self.encoding = "categorical"
         self.slot_size = 1
+        self.use_token_weights = use_token_weights
+
+    def fit_and_encode(self, data: Iterable) -> Tensor:
+        self.dtype = data.dtype
+        encoded, self.mapping = tokenize(data)
+
+        if self.use_token_weights:
+            self._token_weights = inverse_token_frequency(encoded)
+            if self.verbose:
+                print(
+                    f">>> CategoricalTokeniser: Using token weights for {self.name} with shape {self._token_weights.shape} <<<"
+                )
+
         self.size = len(self.mapping)
 
-        if verbose:
+        if self.verbose:
             if self.size > 20:
                 print(
                     f">>> Warning: {self} has more than 20 categories ({self.size})). <<<"
                 )
+        return encoded.unsqueeze(-1)
 
     def __str__(self):
         if self.verbose:
             return f"{self.__class__.__name__}: ({self.name}) size: {self.size}, categories: {self.mapping}, dtype: {self.dtype}"
         return f"{self.__class__.__name__}: ({self.name}) size: {self.size}"
-
-    def get_weights(self) -> Tensor:
-        """Calculate weights for each category based on their frequency in the data.
-        Weights are calculated as the inverse of the frequency, normalized by the mean frequency.
-        So that the mean weight is 1.
-
-        Returns:
-            Tensor: weights for each category."""
-        freq = self.encoded.bincount().float()
-        freq = freq / freq.mean()
-        freq = 1.0 / freq
-        return freq
 
     def encode(self, data: Iterable) -> Tensor:
         return tokenize(data, self.mapping)[0].unsqueeze(-1)

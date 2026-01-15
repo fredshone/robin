@@ -37,3 +37,20 @@ def tokenize(
         encoded = data.replace(encoding_map).cast(pl.Int8)
     encoded = Tensor(encoded.to_numpy().copy()).int()
     return encoded, encoding_map
+
+
+def inverse_token_frequency(encoded: Tensor) -> Tensor:
+    """Calculate weights for each token based on their frequency in the data.
+    Weights are calculated as the inverse of the frequency, normalized by the mean frequency.
+    So that the mean weight is 1.
+
+    Args:
+        encoded (Tensor): Tensor of encoded tokens.
+
+    Returns:
+        Tensor: weights for each token.
+    """
+    freq = encoded.squeeze(-1).bincount().float()
+    freq = freq / freq.mean()
+    freq = 1.0 / freq
+    return freq

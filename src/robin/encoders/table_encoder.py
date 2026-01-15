@@ -4,24 +4,14 @@ import pandas as pd
 import pandas.api.types as ptypes
 import polars as pl
 from torch import Tensor, cat
-from torch.utils.data import Dataset
 
-from robin.encoders.base import CategoricalTokeniser, MinMaxEncoder
-from robin.encoders.gmm_encoder import GMMEncoder
-
-
-class TableDataset(Dataset):
-    def __init__(self, data: Tensor):
-        self.data = data
-
-    def __repr__(self):
-        return f"Table Dataset: {self.data.shape}"
-
-    def __getitem__(self, index):
-        return self.data[index]
-
-    def __len__(self):
-        return len(self.data)
+from robin.encoders.base import (
+    CategoricalTokeniser,
+    MinMaxEncoder,
+    StandardScalerEncoder,
+)
+from robin.encoders.decompose import GMMEncoder
+from robin.encoders.table_datasets import XDataset
 
 
 class TableEncoder:
@@ -32,10 +22,11 @@ class TableEncoder:
         include: Optional[list] = None,
         exclude: Optional[list] = None,
         verbose: bool = False,
-        enable_decomposed_continuous: bool = False,
+        continuous_encoding: str = "minmax",
         max_components: Optional[int] = None,
         learn_rounding_scheme: bool = False,
         enforce_min_max_values: bool = False,
+        use_token_weights: bool = False,
     ):
         """Encode a dataframe into a Tensor,
         and initialise mapping for further encoding and decoding.
@@ -44,17 +35,24 @@ class TableEncoder:
             include (list, optional): columns to include. Defaults to None.
             exclude (list, optional): columns to exclude. Defaults to None.
             verbose (bool, optional): print the configuration. Defaults to False.
-            enable_decomposed_continuous (bool, optional): enable GMM encoding for continuous columns. Defaults to False.
+            continuous_encoding (str, optional): continuous encoding scheme. Defaults to "minmax".
             max_components (int, optional): maximum number of GMM components. Defaults to None.
             learn_rounding_scheme (bool, optional): learn rounding scheme for continuous columns. Defaults to False.
-            enforce_min_max_values (bool, optional): enforce min and max values for continuous columns
+            enforce_min_max_values (bool, optional): enforce min and max values for continuous columns.
+            use_token_weights (bool, optional): enable token weighting based on inverse token frequency. Defaults to False.
         """
 
         self.verbose = verbose
-        self.enable_decomposed_continuous = enable_decomposed_continuous
+        self.continuous_encoder = {
+            "minmax": MinMaxEncoder,
+            "standard": StandardScalerEncoder,
+            "decomposed": GMMEncoder,
+        }.get(continuous_encoding)
+
         self.max_components = max_components
         self.learn_rounding = learn_rounding_scheme
         self.enforce_min_max = enforce_min_max_values
+        self.use_token_weights = use_token_weights
 
         columns = data.columns
         columns = [col for col in columns if col not in ["pid", "iid", "hid"]]
@@ -68,15 +66,29 @@ class TableEncoder:
 
         self.columns = columns
 
+    def fit_and_encode(self, data: Union[pl.DataFrame, pd.DataFrame]) -> None:
+        self.encoders = {}
         self.mode = type(data)
-        if isinstance(data, pd.DataFrame):
-            self.configure_pandas(data, verbose=verbose)
-        elif isinstance(data, pl.DataFrame):
-            self.configure_polars(data, verbose=verbose)
-        else:
-            raise ValueError("Data must be a pandas or polars dataframe")
+        self.initialise_encoders(data)
+
+        encoded = []
+        for name, encoder in self.encoders.items():
+            if name not in data.columns:
+                raise UserWarning(
+                    f"Expected column '{name}' based on configuration, but not found in data"
+                )
+            x = encoder.fit_and_encode(data[name])
+            encoded.append(x)
+
         if self.verbose:
             print(str(self))
+
+        if not encoded:
+            raise UserWarning("No encodings found.")
+
+        encoded = cat(encoded, dim=-1).float()
+        dataset = XDataset(encoded)
+        return dataset
 
     def __repr__(self):
         return f"{self.__class__.__name__}: ({len(self.encoders)} encoders)"
@@ -86,16 +98,22 @@ class TableEncoder:
             [f"\t--> {e}" for e in self.encoders.values()]
         )
 
-    def configure_polars(
-        self, data: pl.DataFrame, verbose: bool = False
+    def initialise_encoders(
+        self, data: Union[pl.DataFrame, pd.DataFrame]
     ) -> None:
+        if isinstance(data, pd.DataFrame):
+            self.configure_pandas(data)
+        elif isinstance(data, pl.DataFrame):
+            self.configure_polars(data)
+        else:
+            raise ValueError("Data must be a pandas or polars dataframe")
+
+    def configure_polars(self, data: pl.DataFrame) -> None:
         """Configure the tokeniser by encoding the dataframe columns.
         Args:
             data (pl.DataFrame): input dataframe to configure.
             verbose (bool, optional): print the configuration. Defaults to False.
         """
-
-        self.encoders = {}
 
         for column in self.columns:
             if column not in data.columns:
@@ -110,38 +128,33 @@ class TableEncoder:
                 or dtype == pl.Enum
             ):
                 self.encoders[column] = CategoricalTokeniser(
-                    data[column], column, verbose=verbose
-                )
-            elif dtype.is_numeric() and self.enable_decomposed_continuous:
-                self.encoders[column] = GMMEncoder(
-                    data[column],
                     column,
-                    verbose=verbose,
+                    verbose=self.verbose,
+                    use_token_weights=self.use_token_weights,
+                )
+
+            elif dtype.is_numeric():
+                self.encoders[column] = self.continuous_encoder(
+                    column,
+                    verbose=self.verbose,
                     max_components=self.max_components,
                     learn_rounding=self.learn_rounding,
                     enforce_min_max=self.enforce_min_max,
+                    use_token_weights=self.use_token_weights,
                 )
-            elif dtype.is_numeric():
-                self.encoders[column] = MinMaxEncoder(
-                    data[column],
-                    column,
-                    verbose=verbose,
-                    learn_rounding=self.learn_rounding,
-                )
+
             else:
                 raise UserWarning(
                     f"Column '{column}' not supported for encoding: {values.dtype}"
                 )
 
-    def configure_pandas(
-        self, data: pd.DataFrame, verbose: bool = False
-    ) -> None:
+    def configure_pandas(self, data: pd.DataFrame) -> None:
         """Configure the tokeniser by encoding the dataframe columns.
         Args:
             data (pd.DataFrame): input dataframe to configure.
             verbose (bool, optional): print the configuration. Defaults to False.
         """
-        self.encoders = {}
+
         for column in self.columns:
             if column not in data.columns:
                 raise UserWarning(f"Column '{column}' not found in attributes")
@@ -152,25 +165,18 @@ class TableEncoder:
                 or ptypes.is_categorical_dtype(values)
             ):
                 self.encoders[column] = CategoricalTokeniser(
-                    data[column], column, verbose=verbose
-                )
-            elif (
-                ptypes.is_numeric_dtype(values)
-                and self.enable_decomposed_continuous
-            ):
-                self.encoders[column] = GMMEncoder(
-                    data[column],
                     column,
-                    verbose=verbose,
-                    learn_rounding=self.learn_rounding,
-                    enforce_min_max=self.enforce_min_max,
+                    verbose=self.verbose,
+                    use_token_weights=self.use_token_weights,
                 )
             elif ptypes.is_numeric_dtype(values):
-                self.encoders[column] = MinMaxEncoder(
-                    data[column],
+                self.encoders[column] = self.continuous_encoder(
                     column,
-                    verbose=verbose,
+                    verbose=self.verbose,
+                    max_components=self.max_components,
                     learn_rounding=self.learn_rounding,
+                    enforce_min_max=self.enforce_min_max,
+                    use_token_weights=self.use_token_weights,
                 )
             else:
                 raise UserWarning(
@@ -190,15 +196,15 @@ class TableEncoder:
                 raise UserWarning(
                     f"Expected column '{column}' based on configuration, but not found in data"
                 )
-            column_encoded = encoder.encode(data[column])
-            encoded.append(column_encoded)
+            x = encoder.encode(data[column])
+            encoded.append(x)
 
         if not encoded:
             raise UserWarning("No encodings found.")
 
         encoded = cat(encoded, dim=-1).float()
-        dataset = TableDataset(encoded)
-        return dataset  # todo: weights
+        dataset = XDataset(encoded)
+        return dataset
 
     def decode(self, data: List[Tensor]) -> pd.DataFrame | pl.DataFrame:
         """Decode Tensor of tokens back into dataframe.
@@ -280,9 +286,6 @@ class TableEncoder:
         """
         return [encoder.size for encoder in self.encoders.values()]
 
-    def weights(self) -> List[List[Optional[float]]]:
-        """Get the weights of the embeddings.
-        Returns:
-            List[List[Optional[float]]]: list of weights of the embeddings.
-        """
-        return [encoder.get_weights() for encoder in self.encoders.values()]
+    def token_weights(self) -> list[Tensor]:
+        """Get the token weights for each encoder."""
+        return [encoder._token_weights for encoder in self.encoders.values()]
