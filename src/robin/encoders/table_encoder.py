@@ -16,6 +16,12 @@ from robin.encoders.table_datasets import XDataset
 
 class TableEncoder:
 
+    continuous_encoders = {
+        "minmax": MinMaxEncoder,
+        "standard": StandardScalerEncoder,
+        "decomposed": GMMEncoder,
+    }
+
     def __init__(
         self,
         data: Union[pl.DataFrame, pd.DataFrame],
@@ -43,12 +49,14 @@ class TableEncoder:
         """
 
         self.verbose = verbose
-        self.continuous_encoder = {
-            "minmax": MinMaxEncoder,
-            "standard": StandardScalerEncoder,
-            "decomposed": GMMEncoder,
-        }.get(continuous_encoding)
-
+        self.continuous_encoder = self.continuous_encoders.get(
+            continuous_encoding
+        )
+        if self.continuous_encoder is None:
+            raise ValueError(
+                f"Continuous encoding '{continuous_encoding}' not recognised. "
+                f"Available options: {list(self.continuous_encoders.keys())}"
+            )
         self.max_components = max_components
         self.learn_rounding = learn_rounding_scheme
         self.enforce_min_max = enforce_min_max_values
@@ -128,14 +136,14 @@ class TableEncoder:
                 or dtype == pl.Enum
             ):
                 self.encoders[column] = CategoricalTokeniser(
-                    column,
+                    name=column,
                     verbose=self.verbose,
                     use_token_weights=self.use_token_weights,
                 )
 
             elif dtype.is_numeric():
                 self.encoders[column] = self.continuous_encoder(
-                    column,
+                    name=column,
                     verbose=self.verbose,
                     max_components=self.max_components,
                     learn_rounding=self.learn_rounding,
@@ -165,13 +173,13 @@ class TableEncoder:
                 or ptypes.is_categorical_dtype(values)
             ):
                 self.encoders[column] = CategoricalTokeniser(
-                    column,
+                    name=column,
                     verbose=self.verbose,
                     use_token_weights=self.use_token_weights,
                 )
             elif ptypes.is_numeric_dtype(values):
                 self.encoders[column] = self.continuous_encoder(
-                    column,
+                    name=column,
                     verbose=self.verbose,
                     max_components=self.max_components,
                     learn_rounding=self.learn_rounding,

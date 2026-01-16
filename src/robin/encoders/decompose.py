@@ -4,128 +4,149 @@ from typing import Iterable, Optional
 import numpy as np
 import polars as pl
 from sklearn.mixture import BayesianGaussianMixture
-from sklearn.preprocessing import (
-    PowerTransformer,
-    QuantileTransformer,
-    StandardScaler,
-)
+from sklearn.preprocessing import PowerTransformer, StandardScaler
 from torch import Tensor
 
 from robin.encoders.base import BaseEncoder
 from robin.encoders.utils import inverse_token_frequency
 
 
+class NonTransform:
+    """Identity transform: z = x; inverse: x = z"""
+
+    def fit(self, x):
+        return self
+
+    def encode(self, x):
+        return x
+
+    def decode(self, x):
+        return x
+
+    def log_abs_det_jacobian(self, x):
+        return 0
+
+
+class MinMaxTransform:
+    """z = (x - min) / (max - min); inverse: x = z * (max - min) + min"""
+
+    def fit(self, x):
+        self.min = np.min(x, axis=0)
+        self.max = np.max(x, axis=0)
+        return self
+
+    def encode(self, x):
+        return (x - self.min) / (self.max - self.min)
+
+    def decode(self, z):
+        return z * (self.max - self.min) + self.min
+
+    def log_abs_det_jacobian(self, x):
+        # Linear transform z = (x - min)/(max - min) => |det J| = prod(1/(max-min))
+        # log|det J| is constant per row
+        s = self.max - self.min
+        return np.full(x.shape[0], -np.sum(np.log(np.abs(s))))
+
+
+class StandardScaler:
+    def __init__(self):
+        self.ss = StandardScaler(with_mean=True, with_std=True)
+
+    def fit(self, x):
+        self.ss.fit(x)
+        return self
+
+    def encode(self, x):
+        return self.ss.transform(x)
+
+    def decode(self, z):
+        return self.ss.inverse_transform(z)
+
+    def log_abs_det_jacobian(self, x):
+        # Linear transform z = (x-mu)/sigma => |det J| = prod(1/sigma_j)
+        # log|det J| is constant per row
+        s = self.ss.scale_
+        return np.full(x.shape[0], -np.sum(np.log(np.abs(s))))
+
+
 class LogTransform:
     """z = log(x + c); inverse: x = exp(z) - c"""
 
-    def __init__(self, offset=0.0):
-        self.c = float(offset)
-
-    def fit(self, X):
-        if np.min(X) + self.c <= 0:
-            raise ValueError("log requires X + offset > 0 for all entries.")
+    def fit(self, x):
+        self.c = np.min(x)
         return self
 
-    def encode(self, X):
-        return np.log(X + self.c)
+    def encode(self, x):
+        return np.log(x + self.c)
 
-    def decode(self, Z):
-        return np.exp(Z) - self.c
+    def decode(self, z):
+        return np.exp(z) - self.c
 
-    def log_abs_det_jacobian(self, X):
-        return -np.log(X + self.c).sum(axis=1)
+    def log_abs_det_jacobian(self, x):
+        return -np.log(x + self.c).sum(axis=1)
+
+
+class BoxCoxTransform:
+    """Uses sklearn PowerTransformer (box-cox)."""
+
+    def __init__(self):
+        self.pt = PowerTransformer(method="box-cox", standardize=False)
+
+    def fit(self, x):
+        self.pt.fit(x)
+        return self
+
+    def encode(self, x):
+        return self.pt.transform(x)
+
+    def decode(self, z):
+        return self.pt.inverse_transform(z)
+
+    def log_abs_det_jacobian(self, x):
+        out = np.zeros(x.shape[0])
+        for j, lam in enumerate(self.pt.lambdas_):
+            out += (lam - 1.0) * np.log(x[:, j])
+        return out
 
 
 class YeoJohnsonTransform:
     """Uses sklearn PowerTransformer (yeo-johnson)."""
 
     def __init__(self):
-        self.pt = PowerTransformer(
-            method="yeo-johnson", standardize=False
-        )  # keep scaling separate if desired
+        self.pt = PowerTransformer(method="yeo-johnson", standardize=False)
 
-    def fit(self, X):
-        self.pt.fit(X)
+    def fit(self, x):
+        self.pt.fit(x)
         return self
 
-    def encode(self, X):
-        return self.pt.transform(X)
+    def encode(self, x):
+        return self.pt.transform(x)
 
-    def decode(self, Z):
-        return self.pt.inverse_transform(Z)
+    def decode(self, z):
+        return self.pt.inverse_transform(z)
 
-    def log_abs_det_jacobian(self, X):
-        eps = 1e-6
-        n, d = X.shape
-        log_det = np.zeros(n)
-        for j in range(d):
-            x = X[:, [j]]
-            z = self.encode(x)  # shape (n,1)
-            # central difference on f w.r.t. x_j
-            x_plus = x + eps
-            x_minus = x - eps
-            z_plus = self.encode(x_plus)
-            z_minus = self.encode(x_minus)
-            dzdx = (z_plus - z_minus) / (2 * eps)
-            log_det += np.log(np.abs(dzdx[:, 0]) + 1e-15)
-        return log_det
+    def log_abs_det_jacobian(self, x):
+        out = np.zeros(x.shape[0])
+        for j, lam in enumerate(self.pt.lambdas_):
+            col = x[:, j]
+            pos = col >= 0
+
+            # positive
+            out[pos] += (lam - 1) * np.log(col[pos] + 1)
+            # negative
+            out[~pos] += (1 - lam) * np.log(1 - col[~pos])
+
+        return out
 
 
-class QuantileNormalTransform:
-    """Approximately invertible Gaussianizer via quantile mapping to N(0,1)."""
-
-    def __init__(self, n_quantiles=1000, subsample=10_000, random_state=0):
-        self.qt = QuantileTransformer(
-            n_quantiles=n_quantiles,
-            output_distribution="normal",
-            subsample=subsample,
-            random_state=random_state,
-        )
-
-    def fit(self, X):
-        self.qt.fit(X)
-        return self
-
-    def encode(self, X):
-        return self.qt.transform(X)
-
-    def decode(self, Z):
-        return self.qt.inverse_transform(Z)
-
-    def log_abs_det_jacobian(self, X):
-        raise NotImplementedError(
-            "QuantileNormalTransform does not implement log|J|."
-        )
-
-
-class Standardize:
-    def __init__(self):
-        self.ss = StandardScaler(with_mean=True, with_std=True)
-
-    def fit(self, X):
-        self.ss.fit(X)
-        return self
-
-    def encode(self, X):
-        return self.ss.transform(X)
-
-    def decode(self, Z):
-        return self.ss.inverse_transform(Z)
-
-    def log_abs_det_jacobian(self, X):
-        # Linear transform z = (x-mu)/sigma => |det J| = prod(1/sigma_j)
-        # log|det J| is constant per row
-        s = self.ss.scale_
-        return np.full(X.shape[0], -np.sum(np.log(np.abs(s) + 1e-15)))
-
-
-class MetaDeecomposer(BaseEncoder):
+class MetaDecomposer(BaseEncoder):
     tranformers = [
-        None,
-        Standardize,
+        NonTransform,
+        MinMaxTransform,
+        StandardScaler,
         LogTransform,
-        YeoJohnsonTransform,
-        QuantileNormalTransform,
+        # BoxCoxTransform,
+        # YeoJohnsonTransform,
     ]
 
     def __init__(
@@ -231,7 +252,6 @@ class GMMEncoder(BaseEncoder):
 
     def __init__(
         self,
-        data: pl.Series,
         name: str,
         max_components: int = 10,
         verbose: bool = False,
@@ -258,13 +278,18 @@ class GMMEncoder(BaseEncoder):
         self.slot_size = 2
 
     def fit_and_encode(self, data: pl.Series) -> Tensor:
+        if not data.dtype.is_numeric():
+            raise UserWarning(
+                "GMM Decomposer only supports numeric data types."
+            )
         self._fit(data)
         encoded = self.encode(data)
         if self.use_token_weights:
             self._token_weights = inverse_token_frequency(encoded[:, 1].long())
+            # if token weights size is less than max components, pad with zeros
             if self.verbose:
                 print(
-                    f">>> GMMEncoder: Using token weights for {self.name} with shape {self._token_weights.shape} <<<"
+                    f">>> GMMEncoder: Using token weights for {self.name} with shape {self._token_weights} <<<"
                 )
 
         self.dtype = data.dtype
@@ -327,23 +352,21 @@ class GMMEncoder(BaseEncoder):
         """
         data = data.to_numpy().reshape(-1, 1)
 
-        # data = data.reshape((len(data), 1))
         means = self.transformer.means_.reshape((1, self.max_components))
         means = means[:, self.threshold_mask]
         vars = self.transformer.covariances_.reshape((1, self.max_components))
         stds = np.sqrt(vars)
         stds = stds[:, self.threshold_mask]
-
         # Multiply stds by 4 so that a value will be in the range [-1,1] with 99.99% probability
         normalized_values = (data - means) / (4 * stds)
         component_probs = self.transformer.predict_proba(data)
         component_probs = component_probs[:, self.threshold_mask]
-        component_probs = (component_probs + 1e-6) / component_probs.sum(
-            axis=1, keepdims=True
-        )
+        # component_probs = (component_probs) / component_probs.sum(
+        #     axis=1, keepdims=True
+        # )
 
         r = np.expand_dims(np.random.rand(len(data)), axis=1)
-        selected_component = (data.cumsum(axis=1) > r).argmax(axis=1)
+        selected_component = (component_probs.cumsum(axis=1) > r).argmax(axis=1)
 
         aranged = np.arange(len(data))
         normalized = normalized_values[aranged, selected_component]

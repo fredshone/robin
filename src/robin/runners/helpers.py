@@ -115,7 +115,7 @@ def build_model(
     if verbose:
         print(model)
     if ckpt_path:
-        model = model.load_from_checkpoint(ckpt_path)
+        model = model.load_from_checkpoint(ckpt_path, weights_only=False)
     return model
 
 

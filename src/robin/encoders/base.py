@@ -171,20 +171,16 @@ class MinMaxEncoder(BaseEncoder):
         return data
 
 
-class StandardScalerEncoder:
+class StandardScalerEncoder(BaseEncoder):
 
     def __init__(
         self,
-        data: Iterable,
         name: Optional[str] = None,
         verbose: bool = False,
         learn_rounding: bool = False,
         **kwargs,
     ):
-        if not data.dtype.is_numeric():
-            raise UserWarning(
-                "StandardScalerEncoder only supports numeric data types."
-            )
+
         self.name = name
         self.verbose = verbose
         self._learn_rounding = learn_rounding
@@ -193,6 +189,11 @@ class StandardScalerEncoder:
         self.size = 1
 
     def fit_and_encode(self, data: Iterable) -> Tensor:
+
+        if not data.dtype.is_numeric():
+            raise UserWarning(
+                "StandardScalerEncoder only supports numeric data types."
+            )
 
         self.mean = data.mean()
         self.std = data.std()
@@ -246,6 +247,7 @@ class CategoricalTokeniser(BaseEncoder):
         self.use_token_weights = use_token_weights
 
     def fit_and_encode(self, data: Iterable) -> Tensor:
+
         self.dtype = data.dtype
         encoded, self.mapping = tokenize(data)
 

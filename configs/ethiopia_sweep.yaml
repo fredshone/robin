@@ -1,7 +1,7 @@
 sweep:
   description: "Demo sweep"
   project: ethiopia-sweep
-  name: demo
+  name: sweep-ethiopia-1
   method: bayes  # grid or "random" or "bayes"
   metric:
     name: meta_score
@@ -10,7 +10,9 @@ sweep:
   parameters:
     encoder:
       parameters:
-        enable_decomposed_continuous:
+        continuous_encoding:
+          values: [minmax, standard, decomposed]
+        use_token_weights:
           values: [True, False]
 
     model:
@@ -87,10 +89,10 @@ data:
   ]
 
 encoder:
-  enable_decomposed_continuous: False
-  max_components: 10
+  continuous_encoding: minmax
+  max_components: 4
   learn_rounding_scheme: False
-  enforce_min_max_values: True
+  enforce_min_max_values: False
 
 datamodule:
   val_split: 0.1
@@ -108,14 +110,16 @@ gen_dataloader:
   pin_memory: False
 
 model:
-  latent_size_2: 5
-  beta: 0.1
-  lr: 0.0001
-  dropout: 0.3
+  latent_size_2: 3
+  hidden_size_2: 6
+  beta: 0.01
+  lr: 0.001
+  dropout: 0
   activation: True
   normalize: True
+  skips: False
   controls_encoder:
-    depth: 3
+    depth: 2
   encoder:
     depth: 2
   decoder:

@@ -28,10 +28,10 @@ data:
   ]
 
 encoder:
-  continuous_encoding: minmax
-  max_components: 12
+  continuous_encoding: decomposed
+  max_components: 4
   learn_rounding_scheme: False
-  enforce_min_max_values: True
+  enforce_min_max_values: False
   use_token_weights: True
 
 datamodule:
@@ -55,22 +55,24 @@ model:
   lr: 0.01
   dropout: 0.0
   skips: False
+  activation: True
   normalize: True
   hidden_size: 32
+  sampler: argmax
   controls_encoder:
     depth: 2
   encoder:
-    depth: 1
+    depth: 2
   decoder:
-    depth: 1
-  sampler: argmax
+    depth: 2
+
 
 early_stopping:
-  patience: 100
+  patience: 20
 
 trainer:
   min_epochs: 10
-  max_epochs: 1000
+  max_epochs: 100
   check_val_every_n_epoch: 1
   log_every_n_steps: 10
 
