@@ -5,12 +5,12 @@ import pandas.api.types as ptypes
 import polars as pl
 from torch import Tensor, cat
 
-from robin.encoders.base import (
-    CategoricalTokeniser,
+from robin.encoders.column_encoders.categorical import CategoricalTokeniser
+from robin.encoders.column_encoders.decompose import GMMEncoder
+from robin.encoders.column_encoders.numeric import (
     MinMaxEncoder,
     StandardScalerEncoder,
 )
-from robin.encoders.decompose import GMMEncoder
 from robin.encoders.table_datasets import XDataset
 
 
@@ -32,7 +32,6 @@ class TableEncoder:
         max_components: Optional[int] = None,
         learn_rounding_scheme: bool = False,
         enforce_min_max_values: bool = False,
-        use_token_weights: bool = False,
     ):
         """Encode a dataframe into a Tensor,
         and initialise mapping for further encoding and decoding.
@@ -45,7 +44,6 @@ class TableEncoder:
             max_components (int, optional): maximum number of GMM components. Defaults to None.
             learn_rounding_scheme (bool, optional): learn rounding scheme for continuous columns. Defaults to False.
             enforce_min_max_values (bool, optional): enforce min and max values for continuous columns.
-            use_token_weights (bool, optional): enable token weighting based on inverse token frequency. Defaults to False.
         """
 
         self.verbose = verbose
@@ -60,7 +58,6 @@ class TableEncoder:
         self.max_components = max_components
         self.learn_rounding = learn_rounding_scheme
         self.enforce_min_max = enforce_min_max_values
-        self.use_token_weights = use_token_weights
 
         columns = data.columns
         columns = [col for col in columns if col not in ["pid", "iid", "hid"]]
@@ -80,13 +77,15 @@ class TableEncoder:
         self.initialise_encoders(data)
 
         encoded = []
+        weights = []
         for name, encoder in self.encoders.items():
             if name not in data.columns:
                 raise UserWarning(
                     f"Expected column '{name}' based on configuration, but not found in data"
                 )
-            x = encoder.fit_and_encode(data[name])
+            x, w = encoder.fit_and_encode(data[name])
             encoded.append(x)
+            weights.append(w)
 
         if self.verbose:
             print(str(self))
@@ -95,8 +94,64 @@ class TableEncoder:
             raise UserWarning("No encodings found.")
 
         encoded = cat(encoded, dim=-1).float()
-        dataset = XDataset(encoded)
+        weights = cat(weights, dim=-1).float()
+        weights = weights.prod(dim=-1)
+        dataset = XDataset(encoded, weights)
         return dataset
+
+    def encode(self, data: Union[pl.DataFrame, pd.DataFrame]) -> Tensor:
+        """Encode the dataframe into a Tensor.
+        Args:
+            data (Union[pl.DataFrame, pd.DataFrame]): input dataframe to encode.
+        Returns:
+            Tensor: encoded dataframe.
+        """
+        encoded = []
+        weights = []
+        for column, encoder in self.encoders.items():
+            if column not in data.columns:
+                raise UserWarning(
+                    f"Expected column '{column}' based on configuration, but not found in data"
+                )
+            x, w = encoder.encode(data[column])
+            encoded.append(x)
+            weights.append(w)
+
+        if not encoded:
+            raise UserWarning("No encodings found.")
+
+        encoded = cat(encoded, dim=-1).float()
+        weights = cat(weights, dim=-1).float()
+        weights = weights.prod(dim=-1)
+        dataset = XDataset(encoded, weights=weights)
+        return dataset
+
+    def decode(self, data: List[Tensor]) -> pd.DataFrame | pl.DataFrame:
+        """Decode Tensor of tokens back into dataframe.
+
+        Args:
+            data (List[Tensor]): input Tensor of tokens to decode.
+
+        Returns:
+            Union[pd.DataFrame, pl.DataFrame]: decoded dataframe.
+        """
+        assert data.ndim == 2, "Data must be a 2D Tensor"
+        assert data.shape[1] == sum(
+            self.slot_sizes()
+        ), "Data shape does not match encoder configuration"
+
+        decoded = {}
+        for (name, encoder), (i, j) in zip(
+            self.encoders.items(), self.slot_idxs()
+        ):
+            tokens = data[:, i:j]
+            decoded[name] = encoder.decode(tokens)
+        decoded = (
+            pd.DataFrame(decoded)
+            if self.mode == pd.DataFrame
+            else pl.DataFrame(decoded)
+        )
+        return decoded
 
     def __repr__(self):
         return f"{self.__class__.__name__}: ({len(self.encoders)} encoders)"
@@ -136,9 +191,7 @@ class TableEncoder:
                 or dtype == pl.Enum
             ):
                 self.encoders[column] = CategoricalTokeniser(
-                    name=column,
-                    verbose=self.verbose,
-                    use_token_weights=self.use_token_weights,
+                    name=column, verbose=self.verbose
                 )
 
             elif dtype.is_numeric():
@@ -148,7 +201,6 @@ class TableEncoder:
                     max_components=self.max_components,
                     learn_rounding=self.learn_rounding,
                     enforce_min_max=self.enforce_min_max,
-                    use_token_weights=self.use_token_weights,
                 )
 
             else:
@@ -173,9 +225,7 @@ class TableEncoder:
                 or ptypes.is_categorical_dtype(values)
             ):
                 self.encoders[column] = CategoricalTokeniser(
-                    name=column,
-                    verbose=self.verbose,
-                    use_token_weights=self.use_token_weights,
+                    name=column, verbose=self.verbose
                 )
             elif ptypes.is_numeric_dtype(values):
                 self.encoders[column] = self.continuous_encoder(
@@ -184,62 +234,11 @@ class TableEncoder:
                     max_components=self.max_components,
                     learn_rounding=self.learn_rounding,
                     enforce_min_max=self.enforce_min_max,
-                    use_token_weights=self.use_token_weights,
                 )
             else:
                 raise UserWarning(
                     f"Column '{column}' not supported for encoding: {values.dtype}"
                 )
-
-    def encode(self, data: Union[pl.DataFrame, pd.DataFrame]) -> Tensor:
-        """Encode the dataframe into a Tensor.
-        Args:
-            data (Union[pl.DataFrame, pd.DataFrame]): input dataframe to encode.
-        Returns:
-            Tensor: encoded dataframe.
-        """
-        encoded = []
-        for column, encoder in self.encoders.items():
-            if column not in data.columns:
-                raise UserWarning(
-                    f"Expected column '{column}' based on configuration, but not found in data"
-                )
-            x = encoder.encode(data[column])
-            encoded.append(x)
-
-        if not encoded:
-            raise UserWarning("No encodings found.")
-
-        encoded = cat(encoded, dim=-1).float()
-        dataset = XDataset(encoded)
-        return dataset
-
-    def decode(self, data: List[Tensor]) -> pd.DataFrame | pl.DataFrame:
-        """Decode Tensor of tokens back into dataframe.
-
-        Args:
-            data (List[Tensor]): input Tensor of tokens to decode.
-
-        Returns:
-            Union[pd.DataFrame, pl.DataFrame]: decoded dataframe.
-        """
-        assert data.ndim == 2, "Data must be a 2D Tensor"
-        assert data.shape[1] == sum(
-            self.slot_sizes()
-        ), "Data shape does not match encoder configuration"
-
-        decoded = {}
-        for (name, encoder), (i, j) in zip(
-            self.encoders.items(), self.slot_idxs()
-        ):
-            tokens = data[:, i:j]
-            decoded[name] = encoder.decode(tokens)
-        decoded = (
-            pd.DataFrame(decoded)
-            if self.mode == pd.DataFrame
-            else pl.DataFrame(decoded)
-        )
-        return decoded
 
     def encode_series(self, data: pd.Series) -> Tensor:
         """Encode a pandas series into a 1d Tensor.

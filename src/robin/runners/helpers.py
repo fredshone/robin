@@ -104,6 +104,12 @@ def build_model(
         embedding_types=x_encoder.types(),
         slot_idxs=x_encoder.slot_idxs(),
         token_weights=x_encoder.token_weights(),
+        use_token_weights=model_params.get(
+            "use_token_weights", defaults.USE_TOKEN_WEIGHTS
+        ),
+        use_weighted_controls=model_params.get(
+            "use_weighted_controls", defaults.USE_WEIGHTED_CONTROLS
+        ),
         labels_encoder_block=labels_encoder_block,
         encoder_block=encoder,
         decoder_block=decoder,

@@ -1,7 +1,7 @@
 sweep:
   description: "Demo sweep"
   project: ethiopia-sweep
-  name: sweep-ethiopia-1
+  name: 26jan
   method: bayes  # grid or "random" or "bayes"
   metric:
     name: meta_score
@@ -12,11 +12,13 @@ sweep:
       parameters:
         continuous_encoding:
           values: [minmax, standard, decomposed]
-        use_token_weights:
-          values: [True, False]
 
     model:
       parameters:
+        use_token_weights:
+          values: [True, False]
+        use_weighted_controls:
+          values: [True, False]
         latent_size_2:
           distribution: int_uniform
           min: 0

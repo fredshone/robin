@@ -7,7 +7,7 @@ from sklearn.mixture import BayesianGaussianMixture
 from sklearn.preprocessing import PowerTransformer, StandardScaler
 from torch import Tensor
 
-from robin.encoders.base import BaseEncoder
+from robin.encoders.column_encoders.base import BaseEncoder
 from robin.encoders.utils import inverse_token_frequency
 
 
@@ -257,7 +257,6 @@ class GMMEncoder(BaseEncoder):
         verbose: bool = False,
         learn_rounding=False,
         enforce_min_max=False,
-        use_token_weights: bool = False,
         max_iter: int = 100,
         weight_threshold=0.005,
         seed: Optional[int] = None,
@@ -267,7 +266,6 @@ class GMMEncoder(BaseEncoder):
         self.verbose = verbose
         self._learn_rounding = learn_rounding
         self.enforce_min_max = enforce_min_max
-        self.use_token_weights = use_token_weights
         self.max_iter = max_iter
         self.max_components = max_components
         self.weight_threshold = weight_threshold
@@ -283,19 +281,12 @@ class GMMEncoder(BaseEncoder):
                 "GMM Decomposer only supports numeric data types."
             )
         self._fit(data)
-        encoded = self.encode(data)
-        if self.use_token_weights:
-            self._token_weights = inverse_token_frequency(encoded[:, 1].long())
-            # if token weights size is less than max components, pad with zeros
-            if self.verbose:
-                print(
-                    f">>> GMMEncoder: Using token weights for {self.name} with shape {self._token_weights} <<<"
-                )
+        encoded, weights = self.encode(data)
 
         self.dtype = data.dtype
         self.size = sum(self.threshold_mask)
 
-        return encoded
+        return encoded, weights
 
     def __str__(self):
         return f"{self.__class__.__name__}: ({self.name}) {self.size}/{self.max_components} components."
@@ -377,7 +368,16 @@ class GMMEncoder(BaseEncoder):
         encoded = np.stack(rows, axis=1)
         encoded = Tensor(encoded)
         assert encoded.shape[1] == 2
-        return encoded
+
+        if self._token_weights is None:
+            self._token_weights = inverse_token_frequency(encoded[:, 1].long())
+            # if token weights size is less than max components, pad with zeros?
+            if self.verbose:
+                print(
+                    f">>> GMMEncoder: Using token weights for {self.name} with shape {self._token_weights} <<<"
+                )
+        weights = self._token_weights.unsqueeze(-1)[encoded[:, 1].long()]
+        return encoded, weights
 
     def decode(self, data: Iterable) -> pl.Series:
         """Convert data back into the original format.

@@ -50,7 +50,6 @@ def inverse_token_frequency(encoded: Tensor) -> Tensor:
     Returns:
         Tensor: weights for each token.
     """
-    freq = encoded.squeeze(-1).bincount().float()
-    freq = freq / freq.mean()
+    freq = encoded.squeeze(-1).bincount().float().clamp(min=1)
     freq = 1.0 / freq
     return freq

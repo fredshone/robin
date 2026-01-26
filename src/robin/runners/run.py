@@ -5,7 +5,6 @@ import torch
 import yaml
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import WandbLogger
-from torch.random import seed as seeder
 
 from robin.dataloaders.loader import DataModule
 from robin.encoders import TableEncoder, YXDataset
@@ -48,7 +47,7 @@ def run_command(
     )
     config = dict(logger.experiment.config)
 
-    seed = config.pop("seed", seeder())
+    seed = config.pop("seed", 42)
     torch.manual_seed(seed)
 
     yx = helpers.load_data(config)

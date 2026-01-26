@@ -4,14 +4,15 @@ from torch.utils.data import Dataset
 
 
 class XDataset(Dataset):
-    def __init__(self, data: Tensor):
+    def __init__(self, data: Tensor, weights: Tensor):
         self.data = data
+        self.weights = weights
 
     def __repr__(self):
         return f"Dataset: {self.data.shape}"
 
     def __getitem__(self, index):
-        return self.data[index]
+        return self.data[index], self.weights[index]
 
     def __len__(self):
         return len(self.data)

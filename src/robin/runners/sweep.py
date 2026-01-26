@@ -14,7 +14,7 @@ def sweep_command(
     sweep_cfg = config.pop("sweep")
     project = sweep_cfg.get("project")
     if "seed" not in config:
-        config["seed"] = sweep_cfg.get("seed", None)
+        config["seed"] = sweep_cfg.get("seed", 42)
 
     sweep_id = id
     if id is None:

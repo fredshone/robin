@@ -5,7 +5,6 @@ import optuna
 import polars as pl
 import torch
 from pytorch_lightning import Trainer
-from torch.random import seed as seeder
 
 from robin.dataloaders.loader import DataModule
 from robin.encoders import TableEncoder, YXDataset
@@ -36,7 +35,7 @@ def tune_command(
     log_dir.mkdir(exist_ok=True, parents=True)
     tune_dir.mkdir(exist_ok=True, parents=True)
 
-    seed = config.pop("seed", seeder())
+    seed = config.pop("seed", 42)
     torch.manual_seed(seed)
     verbose = config.get("verbose", False)
 

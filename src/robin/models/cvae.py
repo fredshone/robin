@@ -2,7 +2,7 @@ from typing import List, Optional
 
 import torch
 from pytorch_lightning import LightningModule
-from torch import Tensor, exp, nn, optim
+from torch import Tensor, exp, nn, ones_like, optim
 
 
 class CVAE(LightningModule):
@@ -17,6 +17,8 @@ class CVAE(LightningModule):
         beta: float,
         lr: float,
         token_weights: Optional[dict] = None,
+        use_token_weights: bool = False,
+        use_weighted_controls: bool = False,
         sampler: Optional[str] = None,
         verbose: bool = False,
     ):
@@ -31,7 +33,11 @@ class CVAE(LightningModule):
         self.embedding_types = embedding_types
         self.slot_idxs = slot_idxs
 
-        self.token_weights = token_weights or [None] * len(embedding_names)
+        if use_token_weights:
+            self.token_weights = token_weights
+        else:
+            self.token_weights = [None] * len(embedding_names)
+        self.use_weighted_controls = use_weighted_controls
 
         self.sampler = sampler
 
@@ -48,11 +54,13 @@ class CVAE(LightningModule):
         criterion = []
         for etype, weights in zip(self.embedding_types, self.token_weights):
             if etype == "continuous":
-                criterion.append(nn.MSELoss())
+                criterion.append(nn.MSELoss(reduction="none"))
             elif etype == "categorical":
-                criterion.append(nn.NLLLoss(weight=weights))
+                criterion.append(nn.NLLLoss(weight=weights, reduction="none"))
             elif etype == "decomposed":
-                criterion.append(DecomposedLoss(weights=weights))
+                criterion.append(
+                    DecomposedLoss(weights=weights, reduction="none")
+                )
             else:
                 raise ValueError(f"Unknown embedding type: {etype}")
 
@@ -79,10 +87,16 @@ class CVAE(LightningModule):
         mu: Tensor,
         log_var: Tensor,
         targets: Tensor,
+        weights: Tensor,
         **kwargs,
     ) -> dict:
         verbose_metrics = {}
         recons = []
+
+        if self.use_weighted_controls:
+            weights = weights / weights.mean()
+        else:
+            weights = ones_like(weights)
 
         for name, etype, (i, j), lprobs, criterion in zip(
             self.embedding_names,
@@ -95,16 +109,22 @@ class CVAE(LightningModule):
                 target = targets[:, i:j].squeeze(-1)
                 # todo: is exp required?
                 loss = criterion(torch.exp(lprobs), target)
+                loss = loss * weights
+                loss = loss.mean()
                 recons.append(loss)
                 verbose_metrics[f"recon_mse_{name}"] = loss
             elif etype == "categorical":
                 target = targets[:, i:j].squeeze(-1)
                 loss = criterion(lprobs, target.long())
+                loss = loss * weights
+                loss = loss.mean()
                 recons.append(loss)
                 verbose_metrics[f"recon_nll_{name}"] = loss
             elif etype == "decomposed":
                 target = targets[:, i:j]
                 loss = criterion(lprobs, target)
+                loss = loss * weights
+                loss = loss.mean()
                 recons.append(loss)
                 verbose_metrics[f"recon_decomposed_{name}"] = loss
             else:
@@ -178,10 +198,10 @@ class CVAE(LightningModule):
     #     return prob_samples, z
 
     def training_step(self, batch, batch_idx):
-        y, x = batch
+        (y, yw), (x, _) = batch
         log_probs, mu, log_var, _ = self.forward(y, x)
         train_losses = self.loss_function(
-            log_probs=log_probs, mu=mu, log_var=log_var, targets=x
+            log_probs=log_probs, mu=mu, log_var=log_var, targets=x, weights=yw
         )
         self.log_dict(
             {key: val.item() for key, val in train_losses.items()},
@@ -190,10 +210,10 @@ class CVAE(LightningModule):
         return train_losses["loss"]
 
     def validation_step(self, batch, batch_idx, optimizer_idx=0):
-        y, x = batch
+        (y, yw), (x, _) = batch
         log_probs, mu, log_var, _ = self.forward(y, x)
         loss = self.loss_function(
-            log_probs=log_probs, mu=mu, log_var=log_var, targets=x
+            log_probs=log_probs, mu=mu, log_var=log_var, targets=x, weights=yw
         )
         self.log_dict(
             {f"val_{key}": val.item() for key, val in loss.items()},
@@ -204,10 +224,10 @@ class CVAE(LightningModule):
         )
 
     def test_step(self, batch):
-        y, x = batch
+        (y, yw), (x, _) = batch
         log_probs, mu, log_var, _ = self.forward(y, x)
         loss = self.loss_function(
-            log_probs=log_probs, mu=mu, log_var=log_var, targets=x
+            log_probs=log_probs, mu=mu, log_var=log_var, targets=x, weights=yw
         )
         self.log_dict({f"test_{key}": val.item() for key, val in loss.items()})
 
@@ -217,16 +237,18 @@ class CVAE(LightningModule):
         return [optimizer], [scheduler]
 
     def predict_step(self, batch):
-        y, z = batch
+        (y, _), z = batch
         return self.predict(y, z)
 
 
 class DecomposedLoss(nn.Module):
     # todo:option to replace mse with gaussian negative log likelihood
-    def __init__(self, weights: Optional[Tensor] = None):
+    def __init__(
+        self, weights: Optional[Tensor] = None, reduction: str = "none"
+    ):
         super().__init__()
-        self.mse_loss = nn.MSELoss()
-        self.nll_loss = nn.NLLLoss(weight=weights)
+        self.mse_loss = nn.MSELoss(reduction=reduction)
+        self.nll_loss = nn.NLLLoss(weight=weights, reduction=reduction)
 
     def forward(self, log_probs: List[Tensor], target: Tensor) -> Tensor:
         continuous_target = target[:, 0]
