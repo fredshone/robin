@@ -32,6 +32,7 @@ def run_command(
         None
 
     """
+    torch.cuda.empty_cache()
     save_dir = Path(config.get("logging", {}).get("dir", "logs"))
     project = str(config.get("logging", {}).get("project"))
 

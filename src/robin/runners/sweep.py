@@ -11,6 +11,9 @@ def sweep_command(
     test: bool = True,
     verbose: bool = False,
 ):
+    import os
+
+    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     sweep_cfg = config.pop("sweep")
     project = sweep_cfg.get("project")
     if "seed" not in config:

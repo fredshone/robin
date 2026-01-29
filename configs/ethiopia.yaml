@@ -29,10 +29,9 @@ data:
 
 encoder:
   continuous_encoding: decomposed
-  max_components: 4
+  max_components: 10
   learn_rounding_scheme: False
   enforce_min_max_values: False
-  use_token_weights: True
 
 datamodule:
   val_split: 0.1
@@ -50,28 +49,30 @@ gen_dataloader:
   pin_memory: False
 
 model:
-  latent_size: 8
-  beta: 0.01
-  lr: 0.01
-  dropout: 0.0
-  skips: False
+  latent_size_2: 5
+  hidden_size_2: 8
+  beta: 0.0003
+  lr: 0.0001
+  dropout: 0.2
+  skips: True
   activation: True
-  normalize: True
-  hidden_size: 32
-  sampler: argmax
+  normalize: False
+  sampler: multinomial
+  use_token_weights: False
+  use_weighted_controls: False
   controls_encoder:
-    depth: 2
+    depth: 1
   encoder:
-    depth: 2
+    depth: 3
   decoder:
-    depth: 2
+    depth: 3
 
 
 early_stopping:
   patience: 20
 
 trainer:
-  min_epochs: 10
+  min_epochs: 20
   max_epochs: 100
   check_val_every_n_epoch: 1
   log_every_n_steps: 10
