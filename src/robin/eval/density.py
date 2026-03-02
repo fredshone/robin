@@ -40,7 +40,7 @@ def frequencies(df: pl.DataFrame, cols: list[str], alias: str) -> pl.DataFrame:
         pl.DataFrame: DataFrame with frequencies of combinations.
     """
     frequencies = df.group_by(cols).agg(pl.len().alias(alias))
-    new_index = pl.concat_str(cols, separator="_").alias("index")
+    new_index = pl.concat_str(cols, separator=" & ").alias("index")
     frequencies = frequencies.with_columns(new_index).drop(cols)
     return frequencies
 
@@ -70,7 +70,7 @@ def iter_joint_probs(
     for cols in combinations(target.columns, order):
         if ignore is not None and all(col in ignore for col in cols):
             continue
-        name = "_".join(cols)
+        name = " & ".join(cols)
         target_freq = frequencies(target, list(cols), "target")
         synthetic_freq = frequencies(synthetic, list(cols), "synthetic")
         joined = join_probs(target_freq, synthetic_freq)

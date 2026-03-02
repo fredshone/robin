@@ -25,11 +25,19 @@ def row_counts(data: pl.DataFrame) -> pl.DataFrame:
     return data.group_by(data.columns).len(name="counts")
 
 
-def simpsons_index(data):
+def simpsons_index(data, ignore_numerical=True):
+    if ignore_numerical:
+        data = data.select(
+            [
+                col
+                for col in data.columns
+                if data[col].dtype in [pl.String, pl.Categorical]
+            ]
+        )
     counts = row_counts(data)
     probs = counts["counts"] / len(data)
     return (probs**2).sum()
 
 
-def simpsons_index_of_diversity(data):
-    return 1 - simpsons_index(data)
+def simpsons_index_of_diversity(data, ignore_numerical=True):
+    return 1 - simpsons_index(data, ignore_numerical=ignore_numerical)

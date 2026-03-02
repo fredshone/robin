@@ -43,10 +43,13 @@ dependencies = [
   "optuna>=4.6.0",
   "optuna-dashboard>=0.20.0",
   "scikit-learn>=1.8.0",
+  "playwright>=1.58.0",
+  "chromium>=0.0.0",
 ]
 
 [project.scripts]
 robin="robin.cli:cli"
+robin-export-notebook="robin.export_notebook:main"
 
 [project.urls]
 repository = "https://github.com/fredshone/robin"
