@@ -1,89 +1,127 @@
-from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
 import polars as pl
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-from torch import Tensor, argmax, concat, stack
+from torch import Tensor, argmax, concat, isnan, multinomial, stack
 from torch.utils.data import DataLoader
 
 from robin.encoders import YZDataset, ZDataset
+from robin.eval import binning, correctness, creativity, density
 from robin.models.cvae import CVAE
 from robin.models.cvae_components import (
+    ControlsEncoderBlock,
     CVAEDecoderBlock,
     CVAEEncoderBlock,
-    LabelsEncoderBlock,
 )
 from robin.runners import defaults
 
 
-def load_data(config: dict) -> Tuple[pl.DataFrame, pl.DataFrame]:
+def load_data(config: dict) -> pl.DataFrame:
     # load data
     x_path = config["data"]["train_path"]
     x = pl.read_csv(x_path)
 
     # rename columns and select as required
-    rename = config["data"].get("columns", {})
-    if rename:
+    rename = config["data"].get("columns")
+    if isinstance(rename, dict):
         x = x.rename(rename)
         x = x.select(list(rename.values()))
+    elif isinstance(rename, list) and rename:
+        x = x.select(rename)
+    return x
 
+
+def split_data(
+    config: dict, x: pl.DataFrame
+) -> Tuple[pl.DataFrame, pl.DataFrame]:
     y_cols = config["data"]["controls"]
     y = x.select(y_cols)
     x = x.drop(y_cols)
-    return x, y
+    return y, x
 
 
 def build_model(
-    config: dict, x_encoder, y_encoder, ckpt_path: Optional[Path] = None
+    config: dict,
+    x_encoder,
+    y_encoder,
+    ckpt_path: Optional[Path] = None,
+    verbose: bool = False,
 ) -> LightningModule:
     model_params = config.get("model", {})
 
+    # get latent size from config
+    latent_size = get_latent_size(config)
+
+    # get hidden size from config
+    hidden_size = get_hidden_size(config)
+
+    skips = model_params.get("skips", defaults.SKIPS)
+    normalize = model_params.get("normalize", defaults.NORMALIZE)
+    dropout = model_params.get("dropout", defaults.DROPOUT)
+
     # encoder block to embed labels into vec with hidden size
-    labels_encoder_block = LabelsEncoderBlock(
+    labels_encoder_block = ControlsEncoderBlock(
         encoder_types=y_encoder.types(),
+        slot_idxs=y_encoder.slot_idxs(),
         encoder_sizes=y_encoder.sizes(),
         depth=model_params.get("controls_encoder", {}).get(
             "depth", defaults.DEPTH
         ),
-        hidden_size=model_params.get("controls_encoder", {}).get(
-            "hidden_size", defaults.WIDTH
-        ),
+        hidden_size=hidden_size,
+        skips=skips,
+        normalize=normalize,
+        dropout=dropout,
     )
 
     # encoder and decoder block to process census data
     encoder = CVAEEncoderBlock(
         encoder_types=x_encoder.types(),
+        slot_idxs=x_encoder.slot_idxs(),
         encoder_sizes=x_encoder.sizes(),
         depth=model_params.get("encoder", {}).get("depth", defaults.DEPTH),
-        hidden_size=model_params.get("encoder", {}).get(
-            "hidden_size", defaults.WIDTH
-        ),
-        latent_size=model_params.get("latent_size", defaults.LATENT_SIZE),
+        hidden_size=hidden_size,
+        latent_size=latent_size,
+        skips=skips,
+        normalize=normalize,
+        dropout=dropout,
     )
+
     decoder = CVAEDecoderBlock(
         encoder_types=x_encoder.types(),
         encoder_sizes=x_encoder.sizes(),
         depth=model_params.get("decoder", {}).get("depth", defaults.DEPTH),
-        hidden_size=model_params.get("decoder", {}).get(
-            "hidden_size", defaults.WIDTH
-        ),
-        latent_size=model_params.get("latent_size", defaults.LATENT_SIZE),
+        hidden_size=hidden_size,
+        latent_size=latent_size,
+        skips=skips,
+        normalize=normalize,
+        dropout=dropout,
     )
 
     model = CVAE(
         embedding_names=x_encoder.names(),
         embedding_types=x_encoder.types(),
-        embedding_weights=x_encoder.weights(),
+        slot_idxs=x_encoder.slot_idxs(),
+        token_weights=x_encoder.token_weights(),
+        use_token_weights=model_params.get(
+            "use_token_weights", defaults.USE_TOKEN_WEIGHTS
+        ),
+        use_weighted_controls=model_params.get(
+            "use_weighted_controls", defaults.USE_WEIGHTED_CONTROLS
+        ),
         labels_encoder_block=labels_encoder_block,
         encoder_block=encoder,
         decoder_block=decoder,
         beta=model_params.get("beta", defaults.DEFAULT_BETA),
         lr=model_params.get("lr", defaults.DEFAULT_LR),
+        sampler=model_params.get("sampler", defaults.SAMPLER),
+        verbose=verbose,
     )
+    if verbose:
+        print(model)
     if ckpt_path:
-        model = model.load_from_checkpoint(ckpt_path)
+        model = model.load_from_checkpoint(ckpt_path, weights_only=False)
     return model
 
 
@@ -112,11 +150,7 @@ def run_tests(trainer: Trainer, ckpt_path: Optional[str] = None) -> dict:
 
     losses = {}
 
-    losses["train"] = trainer.test(
-        ckpt_path=ckpt_path, dataloaders=trainer.datamodule.train_dataloader()
-    )
-
-    losses["val"] = trainer.test(
+    losses["val"] = trainer.validate(
         ckpt_path=ckpt_path, dataloaders=trainer.datamodule.val_dataloader()
     )
 
@@ -129,26 +163,118 @@ def run_tests(trainer: Trainer, ckpt_path: Optional[str] = None) -> dict:
     return losses
 
 
+def get_latent_size(config: dict) -> int:
+    # get latent size from config
+    model_params = config.get("model", {})
+    latent_size = model_params.get("latent_size_2")
+    if latent_size is not None:
+        return 2**latent_size
+    return model_params.get("latent_size", defaults.LATENT_SIZE)
+
+
+def get_hidden_size(config: dict) -> int:
+    # get hidden size from config
+    model_params = config.get("model", {})
+    hidden_size = model_params.get("hidden_size_2")
+    if hidden_size is not None:
+        return 2**hidden_size
+    return model_params.get("hidden_size", defaults.HIDDEN_SIZE)
+
+
 def build_gen_loader(config: dict, y_dataset: Tensor) -> DataLoader:
     n = len(y_dataset)
-    z_loader = ZDataset(
-        n,
-        latent_size=config.get("model", {}).get(
-            "latent_size", defaults.LATENT_SIZE
-        ),
-    )
-    yz_loader = YZDataset(z_loader, y_dataset)
+    latent_size = get_latent_size(config)
+    z_loader = ZDataset(n, latent_size)
+    yz_loader = YZDataset(y_dataset, z_loader)
     return DataLoader(yz_loader, **config.get("gen_dataloader", {}))
 
 
 def generate(
     config: dict, dataloader: DataLoader, trainer: Trainer
 ) -> Tuple[Tensor, Tensor, Tensor]:
-    ys, xs, zs = zip(*trainer.predict(dataloaders=dataloader))
+    ys, xs, zs = zip(*trainer.predict(dataloaders=dataloader, ckpt_path="best"))
     ys = concat(ys)
-    # todo: currently using argmax to decode categorical variables
-    xs = concat(
-        [stack([argmax(x, dim=1) for x in xb], dim=-1) for xb in xs], dim=0
-    )
+    xs = concat(xs)
     zs = concat(zs)
     return ys, xs, zs
+
+
+def sample(config: dict, xs: Tensor) -> list[Tensor]:
+    """Sample from the output distributions.
+
+    Args:
+        xs (Tensor): List of output tensors from the model.
+
+    Returns:
+        list[Tensor]: Sampled tensors.
+    """
+    sampler = config.get("generate", {}).get("sample", "argmax")
+    if sampler == "argmax":
+        return argmax_sampling(xs)
+    elif sampler == "multinomial":
+        return multinomial_sampling(xs)
+    else:
+        raise ValueError(f"Unknown sampling method: {sampler}")
+
+
+def multinomial_sampling(xs: Tensor) -> list[Tensor]:
+    sampled = []
+    for x in xs:
+        if x.dim() == 1:
+            sampled.append(x)
+        else:
+            # check if any values are negative or NaN
+            if isnan(x).any():
+                sampled.append(x.argmax(dim=-1))
+            else:
+                sampled.append(multinomial(x, num_samples=1).squeeze(1))
+    return stack(sampled, dim=-1)
+
+
+def argmax_sampling(xs: Tensor) -> list[Tensor]:
+    sampled = []
+    for x in xs:
+        if x.dim() == 1:
+            sampled.append(x)
+        else:
+            sampled.append(argmax(x, dim=-1))
+    return stack(sampled, dim=-1)
+
+
+def evaluate(
+    target: pl.DataFrame, synthetic: pl.DataFrame, config: dict
+) -> dict:
+    """Evaluate the synthetic data against the target data.
+
+    Args:
+        target (pl.DataFrame): Target DataFrame.
+        synthetic (pl.DataFrame): Synthetic DataFrame.
+        config (dict): Configuration dictionary.
+
+    Returns:
+        dict: Evaluation metrics.
+    """
+    yx_binned, synth_binned = binning.bin_continuous(target, synthetic, bins=10)
+
+    density_orders = config.get("evaluate", {}).get("densities", [1, 2, 3])
+    homogeneity = config.get("evaluate", {}).get("homogeneity", True)
+    incorrectness = config.get("evaluate", {}).get("incorrectness", True)
+
+    metrics = {
+        f"density_{o}": density.mean_mean_absolute_error(
+            target=yx_binned,
+            synthetic=synth_binned,
+            order=o,
+            controls=config.get("data").get("controls"),
+        )
+        for o in density_orders
+    }
+    if homogeneity:
+        metrics["homogeneity"] = creativity.simpsons_index(synth_binned)
+    if incorrectness:
+        metrics["incorrectness"] = correctness.incorrectness(
+            yx_binned, synth_binned
+        )
+    metrics["meta_score"] = sum(list(metrics.values()))
+
+    return metrics

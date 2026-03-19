@@ -1,0 +1,86 @@
+seed: 12345
+
+logging:
+  dir: "logs"
+  project: "ethiopia"
+
+data:
+  train_path: data/ethiopia/ethiopia_data_cleaned.csv
+  columns: [
+        age,
+        sex,
+        dist_road,
+        dist_market,
+        dist_border,
+        dist_popcenter,
+        dist_admhq,
+        denomination,
+        total_cons_ann,
+        nom_totcons_aeq,
+        walls_material,
+        roof_material,
+        floor_material,
+  ]
+  controls: [
+    sex,
+    age,
+    denomination,
+  ]
+
+encoder:
+  continuous_encoding: decomposed
+  max_components: 10
+  learn_rounding_scheme: False
+  enforce_min_max_values: False
+
+datamodule:
+  val_split: 0.1
+  test_split: 0.0
+  train_batch_size: 1024
+  val_batch_size: 1024
+  test_batch_size: 1024
+  gen_batch_size: 1024
+  num_workers: 4
+  pin_memory: False
+
+gen_dataloader:
+  batch_size: 1024
+  num_workers: 4
+  pin_memory: False
+
+model:
+  latent_size_2: 5
+  hidden_size_2: 8
+  beta: 0.0003
+  lr: 0.0001
+  dropout: 0.2
+  skips: True
+  activation: True
+  normalize: False
+  sampler: multinomial
+  use_token_weights: False
+  use_weighted_controls: False
+  controls_encoder:
+    depth: 1
+  encoder:
+    depth: 3
+  decoder:
+    depth: 3
+
+
+early_stopping:
+  patience: 20
+
+trainer:
+  min_epochs: 20
+  max_epochs: 100
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 10
+
+generate:
+  target_path: None
+
+evaluate:
+  densities: [1,2,3]
+  homogeneity: True
+  incorrectness: True

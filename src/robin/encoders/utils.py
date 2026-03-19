@@ -5,7 +5,9 @@ import polars as pl
 from torch import Tensor
 
 
-def tokenize(data: Union[pd.Series, pl.Series], encoding_map: Optional[dict] = None) -> Tensor:
+def tokenize(
+    data: Union[pd.Series, pl.Series], encoding_map: Optional[dict] = None
+) -> Tensor:
     """
     Tokenize a Series into a Tensor. If no encoding map is provided,
     a new encoding map will be created. If an encoding map is provided,
@@ -33,5 +35,21 @@ def tokenize(data: Union[pd.Series, pl.Series], encoding_map: Optional[dict] = N
         cats = list(data.unique().sort())
         encoding_map = {v: i for i, v in enumerate(cats)}
         encoded = data.replace(encoding_map).cast(pl.Int8)
-    encoded = Tensor(encoded.to_numpy()).int()
+    encoded = Tensor(encoded.to_numpy().copy()).int()
     return encoded, encoding_map
+
+
+def inverse_token_frequency(encoded: Tensor) -> Tensor:
+    """Calculate weights for each token based on their frequency in the data.
+    Weights are calculated as the inverse of the frequency, normalized by the mean frequency.
+    So that the mean weight is 1.
+
+    Args:
+        encoded (Tensor): Tensor of encoded tokens.
+
+    Returns:
+        Tensor: weights for each token.
+    """
+    freq = encoded.squeeze(-1).bincount().float().clamp(min=1)
+    freq = 1.0 / freq
+    return freq
