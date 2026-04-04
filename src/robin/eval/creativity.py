@@ -25,7 +25,7 @@ def row_counts(data: pl.DataFrame) -> pl.DataFrame:
     return data.group_by(data.columns).len(name="counts")
 
 
-def simpsons_index(data, ignore_numerical=True):
+def simpsons_index(data, ignore_numerical=False):
     if ignore_numerical:
         data = data.select(
             [

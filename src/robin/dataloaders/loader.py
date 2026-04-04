@@ -40,7 +40,6 @@ class DataModule(LightningDataModule):
         self.test_batch_size = test_batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
-        self.mapping = None
 
     def setup(self, stage: Optional[str] = None) -> None:
         if self.test_split is None or self.test_split == 0.0:
@@ -69,7 +68,9 @@ class DataModule(LightningDataModule):
             num_workers=self.num_workers,
             shuffle=True,
             pin_memory=self.pin_memory,
-            persistent_workers=True,
+            # persistent_workers requires num_workers > 0; PyTorch raises
+            # ValueError otherwise (e.g. when num_workers=0 for CPU debugging).
+            persistent_workers=self.num_workers > 0,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -79,7 +80,7 @@ class DataModule(LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False,
             pin_memory=self.pin_memory,
-            persistent_workers=True,
+            persistent_workers=self.num_workers > 0,
         )
 
     def test_dataloader(self) -> Optional[DataLoader]:
@@ -91,5 +92,5 @@ class DataModule(LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False,
             pin_memory=self.pin_memory,
-            persistent_workers=True,
+            persistent_workers=self.num_workers > 0,
         )

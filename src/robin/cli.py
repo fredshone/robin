@@ -8,10 +8,10 @@ from robin.runners.sweep import sweep_command
 from robin.runners.tune import tune_command
 
 
-@click.version_option(package_name="mirror")
+@click.version_option(package_name="robin")
 @click.group()
 def cli():
-    """Welcome to the mirror cli."""
+    """Welcome to the robin cli."""
     pass
 
 
@@ -71,4 +71,4 @@ def tune(config_path: click.Path, db_path: Optional[click.Path], verbose: bool):
 
     with open(config_path, "r") as file:
         config = yaml.safe_load(file)
-        tune_command(config, db_path=db_path, verbose=verbose)
+    tune_command(config, db_path=db_path, verbose=verbose)

@@ -6,7 +6,7 @@ import polars as pl
 from torch import Tensor, cat
 
 from robin.encoders.column_encoders.categorical import CategoricalTokeniser
-from robin.encoders.column_encoders.decompose import GMMEncoder
+from robin.encoders.column_encoders.decompose import GMMEncoder, MetaDecomposer
 from robin.encoders.column_encoders.numeric import (
     MinMaxEncoder,
     StandardScalerEncoder,
@@ -20,6 +20,7 @@ class TableEncoder:
         "minmax": MinMaxEncoder,
         "standard": StandardScalerEncoder,
         "decomposed": GMMEncoder,
+        "meta": MetaDecomposer,
     }
 
     def __init__(
@@ -67,7 +68,7 @@ class TableEncoder:
             columns = [col for col in columns if col not in exclude]
 
         if not columns:
-            raise UserWarning("No columns found to encode in table.")
+            raise ValueError("No columns found to encode in table.")
 
         self.columns = columns
 
@@ -80,7 +81,7 @@ class TableEncoder:
         weights = []
         for name, encoder in self.encoders.items():
             if name not in data.columns:
-                raise UserWarning(
+                raise ValueError(
                     f"Expected column '{name}' based on configuration, but not found in data"
                 )
             x, w = encoder.fit_and_encode(data[name])
@@ -91,7 +92,7 @@ class TableEncoder:
             print(str(self))
 
         if not encoded:
-            raise UserWarning("No encodings found.")
+            raise ValueError("No encodings found.")
 
         encoded = cat(encoded, dim=-1).float()
         weights = cat(weights, dim=-1).float()
@@ -110,7 +111,7 @@ class TableEncoder:
         weights = []
         for column, encoder in self.encoders.items():
             if column not in data.columns:
-                raise UserWarning(
+                raise ValueError(
                     f"Expected column '{column}' based on configuration, but not found in data"
                 )
             x, w = encoder.encode(data[column])
@@ -118,7 +119,7 @@ class TableEncoder:
             weights.append(w)
 
         if not encoded:
-            raise UserWarning("No encodings found.")
+            raise ValueError("No encodings found.")
 
         encoded = cat(encoded, dim=-1).float()
         weights = cat(weights, dim=-1).float()
@@ -180,7 +181,7 @@ class TableEncoder:
 
         for column in self.columns:
             if column not in data.columns:
-                raise UserWarning(f"Column '{column}' not found in attributes")
+                raise ValueError(f"Column '{column}' not found in attributes")
             values = data[column]
             dtype = values.dtype
             if (
@@ -204,7 +205,7 @@ class TableEncoder:
                 )
 
             else:
-                raise UserWarning(
+                raise ValueError(
                     f"Column '{column}' not supported for encoding: {values.dtype}"
                 )
 
@@ -217,12 +218,12 @@ class TableEncoder:
 
         for column in self.columns:
             if column not in data.columns:
-                raise UserWarning(f"Column '{column}' not found in attributes")
+                raise ValueError(f"Column '{column}' not found in attributes")
             values = data[column]
             if (
                 ptypes.is_string_dtype(values)
                 or ptypes.is_object_dtype(values)
-                or ptypes.is_categorical_dtype(values)
+                or isinstance(values.dtype, pd.CategoricalDtype)
             ):
                 self.encoders[column] = CategoricalTokeniser(
                     name=column, verbose=self.verbose
@@ -236,7 +237,7 @@ class TableEncoder:
                     enforce_min_max=self.enforce_min_max,
                 )
             else:
-                raise UserWarning(
+                raise ValueError(
                     f"Column '{column}' not supported for encoding: {values.dtype}"
                 )
 
@@ -248,7 +249,7 @@ class TableEncoder:
             Tensor: encoded series.
         """
         if data.name not in self.encoders.keys():
-            raise UserWarning(f"'{data.name}' not found in available encoders")
+            raise ValueError(f"'{data.name}' not found in available encoders")
         encoder = self.encoders[data.name]
         column_encoded = encoder.encode(data)
         return column_encoded

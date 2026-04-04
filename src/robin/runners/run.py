@@ -17,7 +17,7 @@ def run_command(
     ckpt_path: Path = None,
     test: bool = True,
     offline: bool = False,
-) -> None:
+) -> WandbLogger:
     """
     Train, test and generate.
 
@@ -29,7 +29,7 @@ def run_command(
         offline (bool, optional): Run logger in offline mode. Defaults to False.
 
     Returns:
-        None
+        WandbLogger: the experiment logger.
 
     """
     torch.cuda.empty_cache()

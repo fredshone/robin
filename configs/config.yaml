@@ -1,12 +1,12 @@
 seed: 1234
 
 logging:
-  save_dir: "logs"
+  dir: "logs"
   project: "run_demo"
   name: "demo"
 
 data:
-  train_path: data/census.csv
+  train_path: data/census_short.csv
   columns: {
     approx_social_grade: social,
     country_of_birth_3a: country_of_birth,
@@ -71,5 +71,5 @@ early_stopping:
 evaluate:
   include: None
   exclude: None
-  orders: [1,2,3]
+  densities: [1,2,3]
 

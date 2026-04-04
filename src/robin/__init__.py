@@ -1,6 +1,6 @@
-import torch
+"""Top-level module for robin."""
 
-"""Top-level module for mirror."""
+import torch
 
 __author__ = """Fred Shone"""
 __email__ = "fredjshone@gmail.com"

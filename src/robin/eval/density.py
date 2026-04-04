@@ -24,6 +24,8 @@ def mean_mean_absolute_error(
     ):
         mae = calc_mae(x, xhat)
         maes.append(mae)
+    if not maes:
+        return float("nan")
     mmae = sum(maes) / len(maes)
     return mmae
 
@@ -107,9 +109,9 @@ def calc_mae(target: pl.Series, synthetic: pl.Series) -> float:
 
 
 def calc_mnae(target: pl.Series, synthetic: pl.Series) -> float:
-    abs = (target - synthetic).abs()
-    sum = target + synthetic
-    return (abs / sum).mean()
+    abs_diff = (target - synthetic).abs()
+    sum_vals = target + synthetic
+    return (abs_diff / sum_vals).mean()
 
 
 def calc_cross_entropy(

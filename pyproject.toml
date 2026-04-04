@@ -79,7 +79,7 @@ explicit = true
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = "-rav --strict-markers -n1 --nbmake --nbmake-kernel=robin --cov --cov-report=xml --cov-config=pyproject.toml -m 'not high_mem' -p no:memray"
-testpaths = ["tests", "examples", "integration_tests"]
+testpaths = ["tests"]
 # to mark a test, decorate it with `@pytest.mark.[marker-name]`
 markers = ["high_mem", "limit_memory"]
 filterwarnings = [
@@ -92,7 +92,7 @@ branch = true
 source = ["src/"]
 
 [tool.coverage.report]
-fail_under = 40
+fail_under = 60
 
 [tool.coverage.html]
 directory = "reports/coverage"

@@ -55,7 +55,6 @@ model:
   lr: 0.0001
   dropout: 0.2
   skips: True
-  activation: True
   normalize: False
   sampler: multinomial
   use_token_weights: False

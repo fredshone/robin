@@ -4,12 +4,15 @@ logging:
   dir: "logs"
   name: "tune_demo"
 
+sweep:
+  project: "tune_demo"
+
 tune:
   trials: 500
   timeout: 3600  # seconds
 
 data:
-  train_path: data/census.csv
+  train_path: data/census_short.csv
   columns: {
     approx_social_grade: social,
     country_of_birth_3a: country_of_birth,
@@ -57,11 +60,11 @@ model:
   lr: trial.suggest_float("lr", 0.0001, 1, log=True)
   hidden_size: trial.suggest_categorical("hidden_size", [16, 32, 64, 128])
   controls_encoder:
-    depth: trial.suggest_int("depth", 1, 4)
+    depth: trial.suggest_int("controls_depth", 1, 4)
   encoder:
-    depth: trial.suggest_int("depth", 1, 4)
+    depth: trial.suggest_int("encoder_depth", 1, 4)
   decoder:
-    depth: trial.suggest_int("depth", 1, 4)
+    depth: trial.suggest_int("decoder_depth", 1, 4)
 
 early_stopping:
   patience: 2
@@ -74,5 +77,5 @@ trainer:
 evaluate:
   include: None
   exclude: None
-  orders: [1,2,3]
+  densities: [1,2,3]
 

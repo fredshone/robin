@@ -60,7 +60,7 @@ class CategoricalTokeniser(BaseEncoder):
         if safe:
             missing = set(data.unique()) - set(reverse_mapping.keys())
             if missing:
-                raise UserWarning(
+                raise ValueError(
                     f"Missing categories in data: {missing}. Please check your encoding."
                 )
         data = data.replace_strict(reverse_mapping, return_dtype=self.dtype)

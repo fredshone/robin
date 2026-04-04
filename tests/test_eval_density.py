@@ -46,3 +46,11 @@ def test_mmae_order_two():
         {"A": ["1", "1", "1", "2"], "B": ["X", "X", "Y", "Y"]}
     )
     assert mean_mean_absolute_error(target, synthetic, order=2) == 1 / 8
+
+
+def test_mmae_returns_nan_when_all_columns_are_controls():
+    import math
+
+    data = pl.DataFrame({"A": ["1", "2"], "B": ["X", "Y"]})
+    result = mean_mean_absolute_error(data, data, order=1, controls=["A", "B"])
+    assert math.isnan(result)

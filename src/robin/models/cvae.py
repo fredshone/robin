@@ -107,8 +107,7 @@ class CVAE(LightningModule):
         ):
             if etype == "continuous":
                 target = targets[:, i:j].squeeze(-1)
-                # todo: is exp required?
-                loss = criterion(torch.exp(lprobs), target)
+                loss = criterion(lprobs, target)
                 loss = loss * weights
                 loss = loss.mean()
                 recons.append(loss)
@@ -183,8 +182,8 @@ class CVAE(LightningModule):
                 preds.append(sampler(lprobs, dim=1).unsqueeze(-1))
             elif etype == "decomposed":
                 v, k = lprobs[:, 0], lprobs[:, 1:]
-                compoments = sampler(k, dim=1)
-                preds.append(torch.stack([v, compoments], dim=1))
+                components = sampler(k, dim=1)
+                preds.append(torch.stack([v, components], dim=1))
             else:
                 raise ValueError(f"Unknown encoding for {name}, type: {etype}")
 
@@ -209,7 +208,7 @@ class CVAE(LightningModule):
         )
         return train_losses["loss"]
 
-    def validation_step(self, batch, batch_idx, optimizer_idx=0):
+    def validation_step(self, batch, batch_idx):
         (y, yw), (x, _) = batch
         log_probs, mu, log_var, _ = self.forward(y, x)
         loss = self.loss_function(

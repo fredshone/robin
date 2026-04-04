@@ -48,7 +48,7 @@ class MinMaxTransform:
         return np.full(x.shape[0], -np.sum(np.log(np.abs(s))))
 
 
-class StandardScaler:
+class StandardScalerTransformer:
     def __init__(self):
         self.ss = StandardScaler(with_mean=True, with_std=True)
 
@@ -73,7 +73,8 @@ class LogTransform:
     """z = log(x + c); inverse: x = exp(z) - c"""
 
     def fit(self, x):
-        self.c = np.min(x)
+        # c must be > -min(x) so that x + c > 0 for all x.
+        self.c = -np.min(x) + 1e-8
         return self
 
     def encode(self, x):
@@ -140,10 +141,10 @@ class YeoJohnsonTransform:
 
 
 class MetaDecomposer(BaseEncoder):
-    tranformers = [
+    transformers = [
         NonTransform,
         MinMaxTransform,
-        StandardScaler,
+        StandardScalerTransformer,
         LogTransform,
         # BoxCoxTransform,
         # YeoJohnsonTransform,
@@ -177,44 +178,76 @@ class MetaDecomposer(BaseEncoder):
         self.slot_size = 2
 
     def fit_and_encode(self, data: pl.Series) -> Tensor:
-        best_likelihood = -np.inf
-        best_encoded = None
-
-        for transformer in self.transformers:
-            self.transformer = transformer()
+        gmm_kwargs = dict(
+            name=self.name,
+            max_components=self.max_components,
+            verbose=self.verbose,
+            learn_rounding=self._learn_rounding,
+            enforce_min_max=self.enforce_min_max,
+            max_iter=self.max_iter,
+            weight_threshold=self.weight_threshold,
+            seed=self.seed,
+        )
+        candidates = []
+        for transformer_cls in self.transformers:
+            transformer = transformer_cls()
             try:
-                self.transformer.fit(data.to_numpy().reshape(-1, 1))
-                transformed_data = self.transformer.encode(
-                    data.to_numpy().reshape(-1, 1)
-                )
+                transformer.fit(data.to_numpy().reshape(-1, 1))
+                transformed_data = transformer.encode(data.to_numpy().reshape(-1, 1))
                 transformed_series = pl.Series(transformed_data.flatten())
+                gmm_encoder = GMMEncoder(**gmm_kwargs)
+                gmm_encoder.fit_and_encode(transformed_series)
+                score = gmm_encoder.score(transformed_series)
+                candidates.append((transformer, gmm_encoder, score))
                 if self.verbose:
                     print(
-                        f">>> MetaDecomposer: Using {transformer.__name__} for {self.name} <<<"
+                        f">>> MetaDecomposer: {transformer_cls.__name__} scored {score:.4f} for {self.name} <<<"
                     )
-                break
             except Exception as e:
                 if self.verbose:
                     print(
-                        f">>> MetaDecomposer: Transformer {transformer} failed with error: {e} <<<"
+                        f">>> MetaDecomposer: {transformer_cls.__name__} failed for {self.name}: {e} <<<"
                     )
 
-            gmm_encoder = GMMEncoder()
-            encoded = gmm_encoder.fit_and_encode(data)
-            score = gmm_encoder.score(data)
-            # todo
-
-        if self.use_token_weights:
-            self._token_weights = inverse_token_frequency(encoded[:, 1].long())
+        if candidates:
+            self.transformer, gmm_encoder, best_score = max(candidates, key=lambda c: c[2])
+            encoded, weights = gmm_encoder.encode(
+                pl.Series(self.transformer.encode(data.to_numpy().reshape(-1, 1)).flatten())
+            )
             if self.verbose:
                 print(
-                    f">>> GMMEncoder: Using token weights for {self.name} with shape {self._token_weights.shape} <<<"
+                    f">>> MetaDecomposer: Selected {self.transformer.__class__.__name__} "
+                    f"(score={best_score:.4f}) for {self.name} <<<"
                 )
+        else:
+            if self.verbose:
+                print(f">>> MetaDecomposer: All transforms failed for {self.name}, using raw data <<<")
+            self.transformer = NonTransform()
+            gmm_encoder = GMMEncoder(**gmm_kwargs)
+            encoded, weights = gmm_encoder.fit_and_encode(data)
+
+        self.gmm_encoder = gmm_encoder
+        self.threshold_mask = gmm_encoder.threshold_mask
+        self._token_weights = gmm_encoder._token_weights
+
+        if self.use_token_weights and self.verbose:
+            print(
+                f">>> GMMEncoder: Using token weights for {self.name} with shape {self._token_weights.shape} <<<"
+            )
 
         self.dtype = data.dtype
         self.size = sum(self.threshold_mask)
 
-        return encoded
+        return encoded, weights
+
+    def encode(self, data: pl.Series) -> Tensor:
+        transformed = self.transformer.encode(data.to_numpy().reshape(-1, 1))
+        return self.gmm_encoder.encode(pl.Series(transformed.flatten()))
+
+    def decode(self, data) -> pl.Series:
+        decoded_transformed = self.gmm_encoder.decode(data)
+        raw = self.transformer.decode(decoded_transformed.to_numpy().reshape(-1, 1))
+        return pl.Series(raw.flatten())
 
 
 class GMMEncoder(BaseEncoder):
@@ -277,7 +310,7 @@ class GMMEncoder(BaseEncoder):
 
     def fit_and_encode(self, data: pl.Series) -> Tensor:
         if not data.dtype.is_numeric():
-            raise UserWarning(
+            raise ValueError(
                 "GMM Decomposer only supports numeric data types."
             )
         self._fit(data)
@@ -389,7 +422,7 @@ class GMMEncoder(BaseEncoder):
             pl.Series.
         """
         assert data.shape[1] == 2
-        data = np.array(data)
+        data = np.asarray(data)
 
         means = self.transformer.means_.reshape([-1])
         stds = np.sqrt(self.transformer.covariances_).reshape([-1])

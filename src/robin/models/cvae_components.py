@@ -108,7 +108,7 @@ class CVAEDecoderBlock(nn.Module):
                     )
                 )
             elif type == "decomposed":
-                embeds.append(DecomoposedDecoder(hidden_size, size))
+                embeds.append(DecomposedDecoder(hidden_size, size))
             else:
                 raise ValueError(f"Unknown encoder type: {type}")
 
@@ -192,11 +192,12 @@ class FFBlock(nn.Module):
                     "input_size must equal output_size when depth is 0"
                 )
         else:
-            block = [nn.Linear(input_size, hidden_size)]
+            block = [nn.Linear(input_size, hidden_size), nn.LeakyReLU()]
             for _ in range(depth - 1):
                 block.extend(
-                    [nn.LeakyReLU(), nn.Linear(hidden_size, output_size)]
+                    [nn.Linear(hidden_size, hidden_size), nn.LeakyReLU()]
                 )
+            block.append(nn.Linear(hidden_size, output_size))
         if dropout > 0:
             block.append(nn.Dropout(dropout))
         self.block = nn.Sequential(*block)
@@ -234,7 +235,7 @@ class DecomposedEmbedding(nn.Module):
         return self.fc(v) + self.embedding(k).squeeze(1)
 
 
-class DecomoposedDecoder(nn.Module):
+class DecomposedDecoder(nn.Module):
     def __init__(self, hidden_size, size):
         super().__init__()
         self.value_net = nn.Sequential(nn.Linear(hidden_size, 1), nn.Tanh())

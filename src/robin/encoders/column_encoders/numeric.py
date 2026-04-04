@@ -35,7 +35,7 @@ class MinMaxEncoder(BaseEncoder):
     def fit_and_encode(self, data: Iterable) -> Tensor:
 
         if not data.dtype.is_numeric():
-            raise UserWarning(
+            raise ValueError(
                 "ContinuousEncoder only supports numeric data types."
             )
 
@@ -45,7 +45,7 @@ class MinMaxEncoder(BaseEncoder):
         self.mean = data.mean()
         self.std = data.std()
         if self.range == 0:
-            raise UserWarning("Data has no range. Cannot encode.")
+            raise ValueError("Data has no range. Cannot encode.")
         self.dtype = data.dtype
 
         if self._learn_rounding:
@@ -91,14 +91,14 @@ class StandardScalerEncoder(BaseEncoder):
     def fit_and_encode(self, data: Iterable) -> Tensor:
 
         if not data.dtype.is_numeric():
-            raise UserWarning(
+            raise ValueError(
                 "StandardScalerEncoder only supports numeric data types."
             )
 
         self.mean = data.mean()
         self.std = data.std()
         if self.std == 0:
-            raise UserWarning("Data has no variance. Cannot encode.")
+            raise ValueError("Data has no variance. Cannot encode.")
         self.dtype = data.dtype
 
         if self._learn_rounding:

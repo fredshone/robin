@@ -22,7 +22,7 @@ def tokenize(
     if encoding_map:
         missing = set(data.unique()) - set(encoding_map.keys())
         if missing:
-            raise UserWarning(
+            raise ValueError(
                 f"""
                 Categories in data do not match existing categories.
                 {missing} not found.
@@ -52,4 +52,5 @@ def inverse_token_frequency(encoded: Tensor) -> Tensor:
     """
     freq = encoded.squeeze(-1).bincount().float().clamp(min=1)
     freq = 1.0 / freq
+    freq = freq / freq.mean()
     return freq

@@ -43,9 +43,9 @@ def tune_command(
     y, x = helpers.split_data(config, yx)
     encoder_config = config.get("encoder", {})
     x_encoder = TableEncoder(x, verbose=verbose, **encoder_config)
-    x_dataset = x_encoder.encode(data=x)
+    x_dataset = x_encoder.fit_and_encode(data=x)
     y_encoder = TableEncoder(y, verbose=verbose, **encoder_config)
-    y_dataset = y_encoder.encode(data=y)
+    y_dataset = y_encoder.fit_and_encode(data=y)
 
     yx_dataset = YXDataset(y_dataset, x_dataset)
     datamodule = DataModule(dataset=yx_dataset, **config.get("datamodule", {}))
@@ -69,7 +69,6 @@ def tune_command(
             callbacks=callbacks, logger=None, **trial_config.get("trainer", {})
         )
 
-        trainer.logger.log_hyperparams(trial.params)
         trial.set_user_attr("config", trial_config)
 
         trainer.fit(model=model, train_dataloaders=datamodule)
@@ -182,6 +181,6 @@ def parse_suggestion(trial, value: str):
     Or return Nones if not a suggestion.
     """
     if isinstance(value, str) and value.startswith("trial.suggest"):
-        return True, eval(value)
+        return True, eval(value, {"__builtins__": {}}, {"trial": trial})
     else:
         return False, None
