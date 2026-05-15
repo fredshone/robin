@@ -24,10 +24,11 @@ def cut_and_bin_continuous(data: pl.DataFrame, bins: int = 10) -> pl.DataFrame:
 
 
 def apply_cutter(data: pl.DataFrame, cutter: dict) -> pl.DataFrame:
+    if not cutter:
+        return data
     binned = data.clone()
-    labels = [str(i) for i in range(len(next(iter(cutter.values()))) + 1)]
-
     for col, breaks in cutter.items():
+        labels = [str(i) for i in range(len(breaks) + 1)]
         binned = binned.with_columns(
             pl.col(col)
             .cut(breaks=breaks, labels=labels)
